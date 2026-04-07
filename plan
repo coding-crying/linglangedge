@@ -1,0 +1,15 @@
+We are using this media edge app as a starting point for an edge version of our mobile language learning application linglang.app. 
+
+There are lots of things we need. but also we need to test along the way.
+
+Beggining features.
+
+Strip out all google analytics and calls to google servers. This app will need to be foss and able to run fully offline (to start) so that means no phoning home to google!
+
+Audio test. I want to see if we can input audio in the chat version so users can speak in the language and get a response, more than just a translation or transcription...
+
+then I am curious to see the tool calling architecture, we may need to redesign the agentic system to use tool calls to make the burden on the edge less hard.
+
+if the audio input works alright, it would be cool to see if we could also bundle kokoro on the edge for learning english, and then users would need to pay for cloud for more features...
+
+here we are mostly testing backend abilities, when it comes time, I will give you more careful instructions as to how we will set up the UI.
