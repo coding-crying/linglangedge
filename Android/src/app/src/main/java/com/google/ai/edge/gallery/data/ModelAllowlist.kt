@@ -56,13 +56,20 @@ data class AllowedModel(
   val llmSupportAudio: Boolean? = null,
   val llmSupportTinyGarden: Boolean? = null,
   val llmSupportMobileActions: Boolean? = null,
-  val llmSupportThinking: Boolean? = null,
+  val capabilities: List<ModelCapability>? = null,
   val minDeviceMemoryInGb: Int? = null,
   val bestForTaskTypes: List<String>? = null,
   val localModelFilePathOverride: String? = null,
   val url: String? = null,
   val socToModelFiles: Map<String, SocModelFile>? = null,
   val runtimeType: RuntimeType? = null,
+  val aicoreReleaseStage: AICoreModelReleaseStage? = null,
+  val aicorePreference: AICoreModelPreference? = null,
+  val parentModelName: String? = null,
+  val variantLabel: String? = null,
+  val capabilityToTaskTypes: Map<ModelCapability, List<String>>? = null,
+  val updatableModelFiles: List<ModelFile>? = null,
+  val updateInfo: String? = null,
 ) {
   fun toModel(): Model {
     // Construct HF download url.
@@ -100,14 +107,23 @@ data class AllowedModel(
     var llmMaxContextLength: Int? = null
     var accelerators: List<Accelerator> = DEFAULT_ACCELERATORS
     var visionAccelerator: Accelerator = DEFAULT_VISION_ACCELERATOR
+
+    var finalDescription = description
+    var acceleratorsStr = defaultConfig.accelerators
+
+    if (isPixel10()) {
+      finalDescription = description.replace(Regex("\\bNPU\\b"), "TPU")
+      acceleratorsStr = acceleratorsStr?.replace(Regex("\\bnpu\\b"), "tpu")
+    }
+
     if (isLlmModel) {
       val defaultTopK: Int = defaultConfig.topK ?: DEFAULT_TOPK
       val defaultTopP: Float = defaultConfig.topP ?: DEFAULT_TOPP
       val defaultTemperature: Float = defaultConfig.temperature ?: DEFAULT_TEMPERATURE
       llmMaxToken = defaultConfig.maxTokens ?: 1024
       llmMaxContextLength = defaultConfig.maxContextLength
-      if (defaultConfig.accelerators != null) {
-        val items = defaultConfig.accelerators.split(",")
+      if (acceleratorsStr != null) {
+        val items = acceleratorsStr.split(",")
         accelerators = mutableListOf()
         for (item in items) {
           if (item == "cpu") {
@@ -116,6 +132,8 @@ data class AllowedModel(
             accelerators.add(Accelerator.GPU)
           } else if (item == "npu") {
             accelerators.add(Accelerator.NPU)
+          } else if (item == "tpu") {
+            accelerators.add(Accelerator.TPU)
           }
         }
         // Remove GPU from pixel 10 devices.
@@ -133,10 +151,18 @@ data class AllowedModel(
           visionAccelerator = Accelerator.NPU
         }
       }
-      val npuOnly = accelerators.size == 1 && accelerators[0] == Accelerator.NPU
+      val npuOnly =
+        accelerators.size == 1 &&
+          (accelerators[0] == Accelerator.NPU || accelerators[0] == Accelerator.TPU)
       configs =
-        (
-          if (npuOnly) {
+        (if (runtimeType == RuntimeType.AICORE) {
+            createAICoreConfigs(
+              defaultTopK = defaultTopK,
+              defaultTemperature = if (defaultTemperature > 1.0f) 1.0f else defaultTemperature,
+              defaultMaxToken = llmMaxToken,
+              accelerators = accelerators,
+            )
+          } else if (npuOnly) {
             createLlmChatConfigsForNpuModel(
               defaultMaxToken = llmMaxToken,
               accelerators = accelerators,
@@ -149,13 +175,20 @@ data class AllowedModel(
               defaultMaxToken = llmMaxToken,
               defaultMaxContextLength = llmMaxContextLength,
               accelerators = accelerators,
-              supportThinking = llmSupportThinking == true,
+              supportThinking = capabilities?.contains(ModelCapability.LLM_THINKING) == true,
+              supportSpeculativeDecoding =
+                capabilities?.contains(ModelCapability.SPECULATIVE_DECODING) == true,
             )
           })
           .toMutableList()
     }
 
     var learnMoreUrl = "https://huggingface.co/${modelId}"
+
+    if (runtimeType == RuntimeType.AICORE) {
+      downloadUrl = ""
+      learnMoreUrl = "https://developers.google.com/ml-kit/terms"
+    }
 
     // Misc.
     var showBenchmarkButton = true
@@ -167,7 +200,7 @@ data class AllowedModel(
     return Model(
       name = name,
       version = version,
-      info = description,
+      info = finalDescription,
       url = downloadUrl,
       sizeInBytes = sizeInBytes,
       minDeviceMemoryInGb = minDeviceMemoryInGb,
@@ -180,7 +213,7 @@ data class AllowedModel(
       llmSupportAudio = llmSupportAudio == true,
       llmSupportTinyGarden = llmSupportTinyGarden == true,
       llmSupportMobileActions = llmSupportMobileActions == true,
-      llmSupportThinking = llmSupportThinking == true,
+      capabilities = capabilities ?: emptyList(),
       llmMaxToken = llmMaxToken,
       accelerators = accelerators,
       visionAccelerator = visionAccelerator,
@@ -188,6 +221,14 @@ data class AllowedModel(
       localModelFilePathOverride = localModelFilePathOverride ?: "",
       isLlm = isLlmModel,
       runtimeType = runtimeType ?: RuntimeType.LITERT_LM,
+      aicoreReleaseStage = aicoreReleaseStage,
+      aicorePreference = aicorePreference,
+      parentModelName = parentModelName,
+      variantLabel = variantLabel,
+      capabilityToTaskTypes = capabilityToTaskTypes ?: emptyMap(),
+      updatableModelFiles = updatableModelFiles ?: listOf(),
+      updateInfo = updateInfo ?: "",
+      latestModelFile = ModelFile(fileName = downloadedFileName, commitHash = version),
     )
   }
 
@@ -196,7 +237,20 @@ data class AllowedModel(
   }
 }
 
+/** Specific device requirements grouped by a descriptive name. */
+data class NamedDeviceGroup(
+  @SerializedName("groupName") val groupName: String,
+  @SerializedName("description") val description: String? = null,
+  @SerializedName("deviceModels") val deviceModels: List<String>,
+)
+
+/** Hardware-based constraints for model deployment. */
+data class DeviceRequirements(
+  @SerializedName("allowedDeviceGroups") val allowedDeviceGroups: List<NamedDeviceGroup>? = null
+)
+
 /** The model allowlist. */
 data class ModelAllowlist(
   val models: List<AllowedModel>,
+  @SerializedName("aicoreRequirements") val aicoreRequirements: DeviceRequirements? = null,
 )

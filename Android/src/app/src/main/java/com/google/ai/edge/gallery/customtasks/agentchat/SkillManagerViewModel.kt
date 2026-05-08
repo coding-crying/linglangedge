@@ -20,6 +20,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Bundle
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.compose.material.icons.Icons
@@ -27,7 +28,6 @@ import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Kitchen
 import androidx.compose.material.icons.outlined.LocalLibrary
 import androidx.compose.material.icons.outlined.Map
-import androidx.compose.material.icons.outlined.Password
 import androidx.compose.material.icons.outlined.QrCode
 import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.outlined.SentimentVerySatisfied
@@ -35,12 +35,14 @@ import androidx.compose.material.icons.outlined.Tag
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.common.LOCAL_URL_BASE
 import com.google.ai.edge.gallery.common.SkillTryOutChip
 import com.google.ai.edge.gallery.common.getJsonResponse
 import com.google.ai.edge.gallery.data.AllowedSkill
 import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.data.SkillAllowlist
+import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.proto.Skill
 import com.google.ai.edge.litertlm.Contents
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -115,6 +117,23 @@ val TRYOUT_CHIPS: List<SkillTryOutChip> =
     ),
   )
 
+enum class SkillSource(val sourceName: String) {
+  BUILTIN("builtin"),
+  FEATURED("featured"),
+  REMOTE_URL("remote_url"),
+  LOCAL_IMPORT("local_import"),
+  UNKNOWN("unknown"),
+}
+
+enum class SkillAction(val value: String) {
+  ADD("add"),
+  DELETE("delete"),
+  ENABLE("enable"),
+  DISABLE("disable"),
+  ENABLE_ALL("enable_all"),
+  DISABLE_ALL("disable_all"),
+}
+
 data class SkillState(val skill: Skill)
 
 data class SkillManagerUiState(
@@ -173,6 +192,10 @@ constructor(
         try {
           val skillAssetDirs = context.assets.list("skills") ?: emptyArray()
           for (dirName in skillAssetDirs) {
+            // Temporarily disable this skill in built-in skills.
+            if (dirName == "create-calendar-event") {
+              continue
+            }
             val skillMdPath = "skills/$dirName/SKILL.md"
             try {
               context.assets.open(skillMdPath).use { inputStream ->
@@ -337,6 +360,10 @@ constructor(
           // 6. Add to ui states and data store.
           addSkill(skill = skill, addToDataStore = true)
           Log.d(TAG, "Successfully added skill from URL: ${skill.name}")
+          firebaseAnalytics?.logEvent(
+            GalleryEvent.SKILL_MANAGEMENT.id,
+            getSkillLoggingParams(skill).apply { putString("action", SkillAction.ADD.value) },
+          )
           onSuccess()
         }
       } finally {
@@ -518,6 +545,10 @@ constructor(
           val skillWithDir = it.toBuilder().setImportDirName(newImportDirName).build()
           addSkill(skill = skillWithDir, addToDataStore = true)
           Log.d(TAG, "Successfully added skill from local import: ${skillWithDir.name}")
+          firebaseAnalytics?.logEvent(
+            GalleryEvent.SKILL_MANAGEMENT.id,
+            getSkillLoggingParams(skillWithDir).apply { putString("action", SkillAction.ADD.value) },
+          )
           onSuccess()
         }
           ?: run {
@@ -582,6 +613,16 @@ constructor(
       return
     }
 
+    val loggingParams = getSkillLoggingParams(skill)
+    Log.d(
+      TAG,
+      "Analytics: skill_management, action=${SkillAction.DELETE.value}, params=$loggingParams",
+    )
+    firebaseAnalytics?.logEvent(
+      GalleryEvent.SKILL_MANAGEMENT.id,
+      loggingParams.apply { putString("action", SkillAction.DELETE.value) },
+    )
+
     // Update state.
     _uiState.update { currentState ->
       currentState.copy(skills = currentState.skills.filter { it.skill.name != name })
@@ -610,6 +651,18 @@ constructor(
       return
     }
 
+    for (skill in skillsToDelete) {
+      val loggingParams = getSkillLoggingParams(skill)
+      Log.d(
+        TAG,
+        "Analytics: skill_management, action=${SkillAction.DELETE.value}, params=$loggingParams",
+      )
+      firebaseAnalytics?.logEvent(
+        GalleryEvent.SKILL_MANAGEMENT.id,
+        loggingParams.apply { putString("action", SkillAction.DELETE.value) },
+      )
+    }
+
     // Update state.
     _uiState.update { currentState ->
       currentState.copy(skills = currentState.skills.filter { !names.contains(it.skill.name) })
@@ -636,6 +689,13 @@ constructor(
   fun setSkillSelected(skill: SkillState, selected: Boolean) {
     // Update state.
     val updatedSkill = skill.skill.toBuilder().setSelected(selected).build()
+
+    firebaseAnalytics?.logEvent(
+      GalleryEvent.SKILL_MANAGEMENT.id,
+      getSkillLoggingParams(skill.skill).apply {
+        putString("action", if (selected) SkillAction.ENABLE.value else SkillAction.DISABLE.value)
+      },
+    )
     val updatedSkills =
       _uiState.value.skills.map { curSkill ->
         if (curSkill.skill.name == skill.skill.name) {
@@ -662,6 +722,20 @@ constructor(
       currentState.copy(skills = updatedSkills)
     }
 
+    Log.d(
+      TAG,
+      "Analytics: skill_management, action=${if (selected) SkillAction.ENABLE_ALL.value else SkillAction.DISABLE_ALL.value}",
+    )
+    firebaseAnalytics?.logEvent(
+      GalleryEvent.SKILL_MANAGEMENT.id,
+      Bundle().apply {
+        putString(
+          "action",
+          if (selected) SkillAction.ENABLE_ALL.value else SkillAction.DISABLE_ALL.value,
+        )
+      },
+    )
+
     // Update data store.
     viewModelScope.launch(Dispatchers.IO) { dataStoreRepository.setAllSkillsSelected(selected) }
   }
@@ -670,20 +744,21 @@ constructor(
     return _uiState.value.skills.filter { it.skill.selected }.map { it.skill }
   }
 
-  fun getSystemPrompt(baseSystemPrompt: String): Contents {
+  fun injectSkills(baseSystemPrompt: String): Contents {
     // Replace ___SKILLS___ with the following skills list:
     //
-    // # Skill name: skill_name_1
-    // ##Description: skill_description_1
-    // ------
-    // Skill name: skill_name_2
-    // Description: skill_description_2
-    // ------
-    // Skill name: skill_name_3
-    // Description: skill_description_3
-    // ------
+    // - skill_name_1: skill_description_1
+    // - skill_name_2: skill_description_2
+    // - skill_name_3: skill_description_3
     val selectedSkillsNamesAndDescriptions = getSelectedSkillsNamesAndDescriptions()
-    val systemPrompt = baseSystemPrompt.replace("___SKILLS___", selectedSkillsNamesAndDescriptions)
+    val systemPrompt =
+      if (selectedSkillsNamesAndDescriptions.isBlank()) {
+        // If no skills are selected, silently discard the system prompt entirely.
+        // TODO: b/509944016 - Improve this fallback behavior.
+        ""
+      } else {
+        baseSystemPrompt.replace("___SKILLS___", selectedSkillsNamesAndDescriptions)
+      }
     Log.d(TAG, "System prompt:\n$systemPrompt")
     return Contents.of(systemPrompt)
   }
@@ -1099,6 +1174,75 @@ constructor(
     val allSkills = dataStoreRepository.getAllSkills()
     val updatedList = allSkills.map { if (it.name == oldName) updatedSkill else it }
     dataStoreRepository.setSkills(updatedList)
+  }
+
+  private fun getSkillSource(skill: Skill): SkillSource {
+    val isFeatured =
+      skill.skillUrl.isNotEmpty() &&
+        _uiState.value.featuredSkills.any { it.skillUrl == skill.skillUrl }
+    return when {
+      skill.builtIn -> SkillSource.BUILTIN
+      isFeatured -> SkillSource.FEATURED
+      skill.skillUrl.isNotEmpty() -> SkillSource.REMOTE_URL
+      skill.importDirName.isNotEmpty() -> SkillSource.LOCAL_IMPORT
+      else -> SkillSource.UNKNOWN
+    }
+  }
+
+  /**
+   * Generates a short 4-character hash to act as a stable ID. This solves the 100-character limit
+   * for list logging in GA4 AND allows us to distinguish between different custom skills in
+   * reports. Note: When we migrate to Cleancut or a similar service that doesn't have severe
+   * character limits, we can drop the human-readable skill_name from setup events and rely purely
+   * on this hash ID.
+   */
+  fun getSkillShortId(skill: Skill): String {
+    val source = getSkillSource(skill)
+    val identifier =
+      when (source) {
+        SkillSource.BUILTIN,
+        SkillSource.FEATURED -> skill.name
+        SkillSource.LOCAL_IMPORT -> skill.importDirName
+        else -> skill.skillUrl
+      }
+    if (identifier.isEmpty()) return "xxxx"
+
+    val prefix =
+      when (source) {
+        SkillSource.BUILTIN -> "b_"
+        SkillSource.FEATURED -> "f_"
+        SkillSource.LOCAL_IMPORT -> "l_"
+        else -> "c_"
+      }
+
+    return try {
+      val digest = java.security.MessageDigest.getInstance("SHA-256")
+      val hashBytes = digest.digest(identifier.toByteArray())
+      val hexString = hashBytes.joinToString("") { "%02x".format(it) }
+      prefix + hexString.take(4)
+    } catch (e: Exception) {
+      prefix + "fail"
+    }
+  }
+
+  private fun getSkillLoggingParams(skill: Skill): Bundle {
+    val source = getSkillSource(skill)
+    val skillName =
+      if (source == SkillSource.BUILTIN || source == SkillSource.FEATURED) skill.name
+      else "custom_skill"
+    val bundle =
+      Bundle().apply {
+        putString("source", source.sourceName)
+        putString("skill_name", skillName)
+        putString("skill_id", getSkillShortId(skill))
+      }
+    if (
+      skill.skillUrl.isNotEmpty() &&
+        (source == SkillSource.REMOTE_URL || source == SkillSource.FEATURED)
+    ) {
+      bundle.putString("remote_url", skill.skillUrl.take(100))
+    }
+    return bundle
   }
 
   private fun getSkillDestinationDir(originalImportDirName: String): File {

@@ -16,10 +16,14 @@
 
 <resources>
   <!-- TODO(jingjin): Add translation support when i18n is ready. -->
+  <string name="about_this_update" translatable="false">About this update</string>
   <string name="all" translatable="false">All</string>
   <string name="add" translatable="false">Add</string>
   <string name="added" translatable="false">Added</string>
   <string name="add_audio" translatable="false">+Audio</string>
+  <string name="aicore_access_panel_title" translatable="false">You cannot access this model yet. Please follow the steps and return when complete.</string>
+  <string name="aicore_access_panel_button" translatable="false">Open guide</string>
+  <string name="aicore_image_limit_message" translatable="false">The current model can only support 1 image per chat. To ask about another image, create a new chat.</string>
   <string name="aichat_initializing_title" translatable="false">Initializing model</string>
   <string name="aichat_initializing_content" translatable="false">Sit tight, this can take up to 1 minute</string>
   <string name="app_intro" translatable="false">Explore a world of amazing on-device models from</string>
@@ -28,6 +32,7 @@
   <string name="app_name_second_part" translatable="false">Edge Gallery</string>
   <string name="askimage_emptystate_title" translatable="false">Ask Image</string>
   <string name="askimage_emptystate_content" translatable="false">To get started, tap the + below to add an image (max 10 images per chat) and type a prompt to ask a question about it!</string>
+  <string name="askimage_emptystate_content_aicore" translatable="false">To get started, tap the + below to add an image (max 1 image per chat) and type a prompt to ask a question about it!</string>
   <string name="askaudio_emptystate_title" translatable="false">Ask Audio</string>
   <string name="askaudio_emptystate_content" translatable="false">To get started, tap the + below to add a audio clip (limited to 1 clip up to 30 seconds) and type a prompt to transcribe or translate it!</string>
   <string name="gallery_news_notification_title" translatable="false">Gallery News</string>
@@ -188,6 +193,8 @@
   <string name="mobile_actions_supported_actions" translatable="false">Supported sample actions:</string>
   <string name="mobile_actions_tab_model_response" translatable="false">Model response</string>
   <string name="mobile_actions_tab_function_called" translatable="false">Function(s) called</string>
+  <string name="update" translatable="false">Update</string>
+  <string name="update_available" translatable="false">Update available</string>
   <string name="view_results" translatable="false">View results</string>
   <string name="view_console_logs" translatable="false">View console logs</string>
   <string name="warming_up" translatable="false">warming up…</string>
@@ -302,6 +309,20 @@
   <string name="skill_instructions_input_description" translatable="false">Detailed instructions in Markdown format that LLM must follow to accomplish the task.</string>
   <string name="use_call_js_template" translatable="false">Use Call JS template</string>
 
+  <!-- Strings for ChatHistorySideSheet component (used for the chat history side bar) -->
+  <!-- Displayed as the header and section title for the user's past chats. -->
+  <string name="chat_history_title" translatable="false">Chat history</string>
+  <!-- Displayed on the button to clear and start a new chat session. -->
+  <string name="new_chat" translatable="false">New chat</string>
+  <!-- Displayed to clear all current chat history items from the list. -->
+  <string name="clear_all" translatable="false">Clear all</string>
+  <!-- Displayed as a persistent notice at the bottom of the side bar regarding demo usage. -->
+  <string name="chat_history_demo_notice" translatable="false">Chat history does not persist across demos.</string>
+  <!-- Title for warning dialog before clearing chat history. -->
+  <string name="clear_history_dialog_title" translatable="false">Clear history?</string>
+  <!-- Content descriptive text for the clear history warning dialog. -->
+  <string name="clear_history_dialog_content" translatable="false">Are you sure you want to clear the history? This action cannot be undone.</string>
+
   <!-- The following entries are for accessibility -->
 
   <!-- Content description spoken when the "add" icon is focused. [CHAR_LIMIT=NONE] -->
@@ -400,5 +421,9 @@
   <string name="cd_help">Help</string>
   <!-- Content description spoken when the "menu" icon is focused. [CHAR_LIMIT=NONE] -->
   <string name="cd_menu">Menu</string>
+  <!-- Content description spoken when the "scroll to bottom" button is focused. [CHAR_LIMIT=NONE] -->
+  <string name="cd_scroll_to_bottom">Scroll to bottom</string>
+  <!-- Content description spoken when the "chat history" icon is focused. [CHAR_LIMIT=NONE] -->
+  <string name="cd_chat_history">Chat history</string>
 
 </resources>

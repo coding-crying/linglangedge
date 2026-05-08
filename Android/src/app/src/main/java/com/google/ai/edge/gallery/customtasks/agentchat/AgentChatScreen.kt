@@ -75,6 +75,7 @@ import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.AskInfoAgentAction
 import com.google.ai.edge.gallery.common.CallJsAgentAction
+import com.google.ai.edge.gallery.common.LOCAL_URL_BASE
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
@@ -85,7 +86,6 @@ import com.google.ai.edge.gallery.ui.common.GalleryWebView
 import com.google.ai.edge.gallery.ui.common.buildTrackableUrlAnnotatedString
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageCollapsableProgressPanel
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageImage
-import com.google.ai.edge.gallery.ui.common.chat.ChatMessageInfo
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageText
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageType
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageWebView
@@ -103,6 +103,7 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import org.json.JSONObject
 
 private const val TAG = "AGAgentChatScreen"
 private val chatViewJavascriptInterface = ChatWebViewJavascriptInterface()
@@ -134,6 +135,9 @@ fun AgentChatScreen(
   var sendMessageTrigger by remember { mutableStateOf<SendMessageTrigger?>(null) }
   var showAlertForDisabledSkill by remember { mutableStateOf(false) }
   var disabledSkillName by remember { mutableStateOf("") }
+  LaunchedEffect(task) { viewModel.loadSystemPrompt(task) }
+  val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsState()
+  LaunchedEffect(uiSystemPrompt) { curSystemPrompt = uiSystemPrompt }
 
   LlmChatScreen(
     modelManagerViewModel = modelManagerViewModel,
@@ -199,6 +203,11 @@ fun AgentChatScreen(
     onSkillClicked = { showSkillManagerBottomSheet = true },
     showImagePicker = true,
     showAudioPicker = true,
+    getActiveSkills = {
+      skillManagerViewModel.getSelectedSkills().map { skill ->
+        skillManagerViewModel.getSkillShortId(skill)
+      }
+    },
     composableBelowMessageList = { model ->
       val actionChannel = agentTools.actionChannel
       val doneIcon = ImageVector.vectorResource(R.drawable.skill)
@@ -221,12 +230,35 @@ fun AgentChatScreen(
               )
             }
             is CallJsAgentAction -> {
+              val skillName =
+                if (action.url.contains("/skills/")) {
+                  action.url.substringAfter("/skills/").substringBefore("/")
+                } else if (action.url.startsWith(LOCAL_URL_BASE + "/")) {
+                  action.url.substringAfter(LOCAL_URL_BASE + "/").substringBefore("/")
+                } else {
+                  action.url
+                }
+              val skill = skillManagerViewModel.getSkill(name = skillName)
+              val skillId = skill?.let { skillManagerViewModel.getSkillShortId(it) } ?: "xxxx"
               try {
                 // Set up a safety net timeout so we NEVER hang the chat or tool execution
                 launch {
                   delay(60000L) // 60 seconds max
                   if (!action.result.isCompleted) {
                     Log.e(TAG, "JS Execution timed out, completing with error.")
+                    Log.d(
+                      TAG,
+                      "Analytics: skill_execution, skill_name=$skillName, success=false, error_type=timeout",
+                    )
+                    firebaseAnalytics?.logEvent(
+                      GalleryEvent.SKILL_EXECUTION.id,
+                      Bundle().apply {
+                        putString("skill_name", skillName)
+                        putString("skill_id", skillId)
+                        putBoolean("success", false)
+                        putString("error_type", "timeout")
+                      },
+                    )
                     action.result.complete(
                       "{\"error\": \"Skill execution timed out. Please check network connection.\"}"
                     )
@@ -248,8 +280,25 @@ fun AgentChatScreen(
                 chatViewJavascriptInterface.onResultListener = { result ->
                   Log.d(TAG, "Got result:\n$result")
                   action.result.complete(result)
+                  val isSuccess = !result.contains("\"error\":")
+                  val errorType = if (isSuccess) "" else "js_error"
+                  Log.d(
+                    TAG,
+                    "Analytics: skill_execution, skill_name=$skillName, success=$isSuccess, error_type=$errorType",
+                  )
+                  firebaseAnalytics?.logEvent(
+                    GalleryEvent.SKILL_EXECUTION.id,
+                    Bundle().apply {
+                      putString("skill_name", skillName)
+                      putString("skill_id", skillId)
+                      putBoolean("success", isSuccess)
+                      putString("error_type", errorType)
+                    },
+                  )
                 }
 
+                val safeData = JSONObject.quote(action.data)
+                val safeSecret = JSONObject.quote(action.secret)
                 val script =
                   """
                   (async function() {
@@ -265,13 +314,26 @@ fun AgentChatScreen(
                           break;
                         }
                       }
-                      var result = await ai_edge_gallery_get_result(`${action.data}`, `${action.secret}`);
+                      var result = await ai_edge_gallery_get_result($safeData, $safeSecret);
                       AiEdgeGallery.onResultReady(result);
                   })()
                   """
                     .trimIndent()
                 webViewRef?.evaluateJavascript(script, null)
               } catch (e: Exception) {
+                Log.d(
+                  TAG,
+                  "Analytics: skill_execution, skill_name=$skillName, success=false, error_type=exception",
+                )
+                firebaseAnalytics?.logEvent(
+                  GalleryEvent.SKILL_EXECUTION.id,
+                  Bundle().apply {
+                    putString("skill_name", skillName)
+                    putString("skill_id", skillId)
+                    putBoolean("success", false)
+                    putString("error_type", "exception")
+                  },
+                )
                 action.result.completeExceptionally(e)
               }
             }
@@ -324,19 +386,11 @@ fun AgentChatScreen(
     curSystemPrompt = curSystemPrompt,
     onSystemPromptChanged = { newPrompt ->
       curSystemPrompt = newPrompt
-      resetSessionWithCurrentSkills(
-        viewModel,
-        modelManagerViewModel,
-        skillManagerViewModel,
-        task,
-        curSystemPrompt,
-        agentTools,
-        onDone = { model ->
-          viewModel.addMessage(
-            model = model,
-            message = ChatMessageInfo(content = systemPromptUpdatedMessage),
-          )
-        },
+      viewModel.applySystemPromptChange(
+        task = task,
+        model = modelManagerViewModel.uiState.value.selectedModel,
+        newPrompt = newPrompt,
+        systemPromptUpdatedMessage = systemPromptUpdatedMessage,
       )
     },
     emptyStateComposable = { model ->
@@ -544,13 +598,10 @@ private fun resetSessionWithCurrentSkills(
   onDone: (Model) -> Unit = {},
 ) {
   val model = modelManagerViewModel.uiState.value.selectedModel
-  val newSelectedSkills = skillManagerViewModel.getSelectedSkills()
   viewModel.resetSession(
     task = task,
     model = model,
-    systemInstruction =
-      if (newSelectedSkills.isEmpty()) null
-      else skillManagerViewModel.getSystemPrompt(curSystemPrompt),
+    systemInstruction = skillManagerViewModel.injectSkills(curSystemPrompt),
     tools = listOf(tool(agentTools)),
     supportImage = true,
     supportAudio = true,

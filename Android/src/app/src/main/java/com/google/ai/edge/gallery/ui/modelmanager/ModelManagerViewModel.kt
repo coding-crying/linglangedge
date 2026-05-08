@@ -26,7 +26,9 @@ import com.google.ai.edge.gallery.AppLifecycleProvider
 import com.google.ai.edge.gallery.BuildConfig
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.ProjectConfig
+import com.google.ai.edge.gallery.common.SystemPromptHelper
 import com.google.ai.edge.gallery.common.getJsonResponse
+import com.google.ai.edge.gallery.common.isAICoreSupported
 import com.google.ai.edge.gallery.customtasks.common.CustomTask
 import com.google.ai.edge.gallery.data.Accelerator
 import com.google.ai.edge.gallery.data.BuiltInTaskId
@@ -40,11 +42,13 @@ import com.google.ai.edge.gallery.data.EMPTY_MODEL
 import com.google.ai.edge.gallery.data.IMPORTS_DIR
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelAllowlist
+import com.google.ai.edge.gallery.data.ModelCapability
 import com.google.ai.edge.gallery.data.ModelDownloadStatus
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.NumberSliderConfig
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.SOC
+import com.google.ai.edge.gallery.data.SystemPromptRepository
 import com.google.ai.edge.gallery.data.TMP_FILE_EXT
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.ValueType
@@ -52,6 +56,8 @@ import com.google.ai.edge.gallery.data.createLlmChatConfigs
 import com.google.ai.edge.gallery.proto.AccessTokenData
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.proto.Theme
+import com.google.ai.edge.gallery.runtime.aicore.AICoreModelHelper
+import com.google.ai.edge.litertlm.Contents
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -190,11 +196,16 @@ constructor(
   val dataStoreRepository: DataStoreRepository,
   private val lifecycleProvider: AppLifecycleProvider,
   private val customTasks: Set<@JvmSuppressWildcards CustomTask>,
+  private val systemPromptRepository: SystemPromptRepository,
   @ApplicationContext private val context: Context,
 ) : ViewModel() {
   private val externalFilesDir = context.getExternalFilesDir(null)
   protected val _uiState = MutableStateFlow(createEmptyUiState())
-  val uiState = _uiState.asStateFlow()
+  open val uiState = _uiState.asStateFlow()
+
+  private var _allowlistModels: MutableList<Model> = mutableListOf()
+  val allowlistModels: List<Model>
+    get() = _allowlistModels
 
   val authService = AuthorizationService(context)
   var curAccessToken: String = ""
@@ -276,12 +287,52 @@ constructor(
     }
   }
 
-  fun downloadModel(task: Task?, model: Model) {
+  open fun downloadModel(task: Task?, model: Model) {
     // Update status.
     setDownloadStatus(
       curModel = model,
       status = ModelDownloadStatus(status = ModelDownloadStatusType.IN_PROGRESS),
     )
+
+    // TODO: b/494029782 - Both litertlm and aicore download and storage should be unified into a
+    // model repository.
+    if (model.runtimeType == RuntimeType.AICORE) {
+      AICoreModelHelper.downloadModel(
+        context = context,
+        coroutineScope = viewModelScope,
+        model = model,
+        onProgress = { downloaded: Long, total: Long ->
+          setDownloadStatus(
+            curModel = model,
+            status =
+              ModelDownloadStatus(
+                status = ModelDownloadStatusType.IN_PROGRESS,
+                receivedBytes = downloaded,
+                totalBytes = total,
+              ),
+          )
+        },
+        onDone = {
+          setDownloadStatus(
+            curModel = model,
+            status =
+              ModelDownloadStatus(
+                status = ModelDownloadStatusType.SUCCEEDED,
+                receivedBytes = model.sizeInBytes,
+                totalBytes = model.sizeInBytes,
+              ),
+          )
+        },
+        onError = { error: String ->
+          setDownloadStatus(
+            curModel = model,
+            status =
+              ModelDownloadStatus(status = ModelDownloadStatusType.FAILED, errorMessage = error),
+          )
+        },
+      )
+      return
+    }
 
     // Delete the model files first.
     deleteModel(model = model)
@@ -295,11 +346,27 @@ constructor(
   }
 
   fun cancelDownloadModel(model: Model) {
+    // TODO: b/494029782 - Both litertlm and aicore download and storage should be unified into a
+    // model repository.
+    // AICore models cannot be deleted from the download repository within the app.
+    if (model.runtimeType == RuntimeType.AICORE) {
+      return
+    }
     downloadRepository.cancelDownloadModel(model)
     deleteModel(model = model)
   }
 
   fun deleteModel(model: Model) {
+    // If the currently downloaded model is an updatable version, reset the model to its latest
+    // version and mark it as not updatable upon deletion.
+    if (model.updatable) {
+      model.updatable = false
+      model.latestModelFile?.let {
+        model.version = it.commitHash
+        model.downloadFileName = it.fileName
+      }
+    }
+
     if (model.imported) {
       deleteFilesFromImportDir(model.downloadFileName)
     } else {
@@ -399,11 +466,13 @@ constructor(
       }
 
       // Call the model initialization function.
+      val systemPrompt = SystemPromptHelper.getEffectiveSystemPrompt(systemPromptRepository, task)
       getCustomTaskByTaskId(id = task.id)
         ?.initializeModelFn(
           context = context,
           coroutineScope = viewModelScope,
           model = model,
+          systemInstruction = Contents.of(systemPrompt),
           onDone = onDoneFn,
         )
     }
@@ -764,6 +833,23 @@ constructor(
     dataStoreRepository.clearAccessTokenData()
   }
 
+  // TODO: b/494029782 - Both litertlm and aicore download and storage should be unified into a
+  // model repository.
+  private fun checkAICoreModelStatuses() {
+    viewModelScope.launch(Dispatchers.Main) {
+      val aicoreModels =
+        uiState.value.tasks
+          .flatMap { it.models }
+          .filter { it.runtimeType == RuntimeType.AICORE }
+          .distinctBy { it.name }
+
+      // Proactively attempt AICore model download upon app startup.
+      for (model in aicoreModels) {
+        downloadModel(task = null, model = model)
+      }
+    }
+  }
+
   private fun processPendingDownloads() {
     // Cancel all pending downloads for the retrieved models.
     downloadRepository.cancelAll {
@@ -809,6 +895,9 @@ constructor(
 
     viewModelScope.launch(Dispatchers.IO) {
       try {
+        // Clear existing allowlist models.
+        _allowlistModels.clear()
+
         // Load model allowlist json.
         var modelAllowlist: ModelAllowlist? = null
 
@@ -853,11 +942,29 @@ constructor(
 
         Log.d(TAG, "Allowlist: $modelAllowlist")
 
+        val isAICoreAvailable by lazy {
+          // Build a fast-lookup set of all supported device models.
+          // This extracts the models from all allowed groups, flattens them into a single stream,
+          // lowercases them for case-insensitive matching, and stores them in a Set.
+          val allowedDeviceModelsSet =
+            modelAllowlist.aicoreRequirements
+              ?.allowedDeviceGroups
+              ?.asSequence()
+              ?.flatMap { it.deviceModels }
+              ?.map { it.lowercase() }
+              ?.toSet()
+          isAICoreSupported(allowedDeviceModelsSet)
+        }
+
         // Convert models in the allowlist.
         val curTasks = getActiveCustomTasks().map { it.task }
         val nameToModel = mutableMapOf<String, Model>()
         for (allowedModel in modelAllowlist.models) {
           if (allowedModel.disabled == true) {
+            continue
+          }
+
+          if (allowedModel.runtimeType == RuntimeType.AICORE && !isAICoreAvailable) {
             continue
           }
 
@@ -877,6 +984,7 @@ constructor(
           }
 
           val model = allowedModel.toModel()
+          _allowlistModels.add(model)
           nameToModel.put(model.name, model)
           for (taskType in allowedModel.taskTypes) {
             val task = curTasks.find { it.id == taskType }
@@ -919,6 +1027,9 @@ constructor(
 
         // Process pending downloads.
         processPendingDownloads()
+
+        // Wait for AICore models statuses and update download indicators
+        checkAICoreModelStatuses()
       } catch (e: Exception) {
         e.printStackTrace()
       }
@@ -1084,6 +1195,7 @@ constructor(
     val llmSupportTinyGarden = info.llmConfig.supportTinyGarden
     val llmSupportMobileActions = info.llmConfig.supportMobileActions
     val llmSupportThinking = info.llmConfig.supportThinking
+    val llmSupportSpeculativeDecoding = info.llmConfig.supportSpeculativeDecoding
     val configs: MutableList<Config> =
       createLlmChatConfigs(
           defaultMaxToken = llmMaxToken,
@@ -1092,8 +1204,30 @@ constructor(
           defaultTemperature = info.llmConfig.defaultTemperature,
           accelerators = accelerators,
           supportThinking = llmSupportThinking,
+          supportSpeculativeDecoding = llmSupportSpeculativeDecoding,
         )
         .toMutableList()
+    val capabilities: MutableList<ModelCapability> = mutableListOf()
+    val capabilityToTaskTypes: MutableMap<ModelCapability, List<String>> = mutableMapOf()
+    if (llmSupportThinking) {
+      capabilities.add(ModelCapability.LLM_THINKING)
+      capabilityToTaskTypes[ModelCapability.LLM_THINKING] =
+        listOf(
+          BuiltInTaskId.LLM_CHAT,
+          BuiltInTaskId.LLM_ASK_IMAGE,
+          BuiltInTaskId.LLM_ASK_AUDIO,
+        )
+    }
+    if (llmSupportSpeculativeDecoding) {
+      capabilities.add(ModelCapability.SPECULATIVE_DECODING)
+      capabilityToTaskTypes[ModelCapability.SPECULATIVE_DECODING] =
+        listOf(
+          BuiltInTaskId.LLM_CHAT,
+          BuiltInTaskId.LLM_ASK_IMAGE,
+          BuiltInTaskId.LLM_ASK_AUDIO,
+          BuiltInTaskId.LLM_PROMPT_LAB,
+        )
+    }
     val model =
       Model(
         name = info.fileName,
@@ -1108,7 +1242,8 @@ constructor(
         llmSupportAudio = llmSupportAudio,
         llmSupportTinyGarden = llmSupportTinyGarden,
         llmSupportMobileActions = llmSupportMobileActions,
-        llmSupportThinking = llmSupportThinking,
+        capabilities = capabilities.toList(),
+        capabilityToTaskTypes = capabilityToTaskTypes.toMap(),
         llmMaxToken = llmMaxToken,
         accelerators = accelerators,
         // We assume all imported models are LLM for now.
@@ -1298,12 +1433,37 @@ constructor(
     _uiState.update { newUiState }
   }
 
-  private fun isModelDownloaded(model: Model): Boolean {
+  @androidx.annotation.VisibleForTesting
+  fun isModelDownloaded(model: Model): Boolean {
+    model.updatable = false
+    // First, check if the model with the current (latest) version has been downloaded.
+    if (checkIfModelDownloaded(model, model.version)) return true
+
+    // If not, check if any updatable model file (previous version) has been downloaded.
+    for (updatableFile in model.updatableModelFiles) {
+      if (updatableFile.commitHash.isEmpty()) continue
+      if (checkIfModelDownloaded(model, updatableFile.commitHash, updatableFile.fileName)) {
+        // If an updatable version is found on the device, update the model's version and file name
+        // to match the downloaded one, and mark it as updatable.
+        model.version = updatableFile.commitHash
+        model.downloadFileName = updatableFile.fileName
+        model.updatable = true
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private fun checkIfModelDownloaded(
+    model: Model,
+    version: String,
+    fileName: String = model.downloadFileName,
+  ): Boolean {
     val modelRelativePath =
-      listOf(model.normalizedName, model.version, model.downloadFileName)
-        .joinToString(File.separator)
+      listOf(model.normalizedName, version, fileName).joinToString(File.separator)
     val downloadedFileExists =
-      model.downloadFileName.isNotEmpty() &&
+      fileName.isNotEmpty() &&
         ((model.localModelFilePathOverride.isEmpty() &&
           isFileInExternalFilesDir(modelRelativePath)) ||
           (model.localModelFilePathOverride.isNotEmpty() &&
@@ -1313,7 +1473,7 @@ constructor(
       model.isZip &&
         model.unzipDir.isNotEmpty() &&
         isFileInExternalFilesDir(
-          listOf(model.normalizedName, model.version, model.unzipDir).joinToString(File.separator)
+          listOf(model.normalizedName, version, model.unzipDir).joinToString(File.separator)
         )
 
     return downloadedFileExists || unzippedDirectoryExists

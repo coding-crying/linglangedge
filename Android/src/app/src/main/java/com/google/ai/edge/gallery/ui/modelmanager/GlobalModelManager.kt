@@ -67,6 +67,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -160,18 +161,38 @@ fun GlobalModelManager(
     }
 
   LaunchedEffect(uiState.modelImportingUpdateTrigger) {
-    val allModelsSet = mutableSetOf<Model>()
-    for (task in uiState.tasks) {
-      for (model in task.models) {
-        allModelsSet.add(model)
-      }
-    }
-    val sortedModels = allModelsSet.toList().sortedBy { it.displayName.ifEmpty { it.name } }
+    val allowlistModels = viewModel.allowlistModels
+    val allowlistOrderMap = allowlistModels.withIndex().associate { it.value.name to it.index }
+
+    val sortedModels =
+      viewModel
+        .getAllModels()
+        // Filter to include only top-level models (those without a parent).
+        .filter { it.parentModelName.isNullOrEmpty() }
+        .sortedWith(
+          compareBy<Model> { model ->
+              // Sort by the index in allowlistModels. Models not in the allowlist come last.
+              allowlistOrderMap[model.name] ?: Int.MAX_VALUE
+            }
+            .thenBy { model ->
+              // If not in the allowlist, sort by their names.
+              model.name
+            }
+        )
     builtInModels.clear()
     builtInModels.addAll(sortedModels.filter { !it.imported })
     importedModels.clear()
     importedModels.addAll(sortedModels.filter { it.imported })
   }
+
+  // Calculate model variants by grouping models with a parentModelName.
+  val modelVariants by
+    remember(uiState.modelImportingUpdateTrigger) {
+      derivedStateOf {
+        val allModels = uiState.tasks.flatMap { it.models }
+        allModels.filter { it.parentModelName != null }.groupBy { it.parentModelName!! }
+      }
+    }
 
   val handleClickModel: (Model) -> Unit = { model ->
     val tasks = viewModel.uiState.value.tasks
@@ -274,6 +295,7 @@ fun GlobalModelManager(
           val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
           ModelItem(
             model = model,
+            modelVariants = modelVariants.getOrDefault(model.name, listOf()),
             task = null,
             modelManagerViewModel = viewModel,
             onModelClicked = handleClickModel,

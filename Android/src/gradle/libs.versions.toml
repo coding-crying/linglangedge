@@ -20,7 +20,7 @@ webkit = "1.14.0"
 protobuf = "0.9.5"
 protobufJavaLite = "4.26.1"
 #noinspection GradleDependency
-litertlm = "0.10.0"
+litertlm = "0.11.0"
 commonmark = "1.0.0-alpha02"
 richtext = "1.0.0-alpha02"
 playServicesTfliteJava = "16.4.0"
@@ -39,6 +39,7 @@ securityCrypto = "1.1.0"
 kotlinReflect = "2.2.21"
 moshi = "1.15.2"
 ksp = "2.3.6"
+mlkit-genai-prompt = "1.0.0-beta2"  # Ref: https://developers.google.com/ml-kit/genai/prompt/android/get-started#configure-project
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -91,6 +92,7 @@ firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging
 androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifinterface" }
 moshi-kotlin = { group = "com.squareup.moshi", name = "moshi-kotlin", version.ref = "moshi" }
 moshi-kotlin-codegen = { group = "com.squareup.moshi", name = "moshi-kotlin-codegen", version.ref = "moshi" }
+mlkit-genai-prompt = { group = "com.google.mlkit", name = "genai-prompt", version.ref = "mlkit-genai-prompt" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -37,7 +37,7 @@ import kotlinx.coroutines.runBlocking
 
 private const val TAG = "AGAgentTools"
 
-class AgentTools() : ToolSet {
+open class AgentTools() : ToolSet {
   lateinit var context: Context
   lateinit var skillManagerViewModel: SkillManagerViewModel
 
@@ -239,19 +239,8 @@ class AgentTools() : ToolSet {
           addItemDescription = "Parameters: $parameters",
         )
       )
-      if (IntentHandler.handleAction(context, intent, parameters)) {
-        return@runBlocking mapOf(
-          "action" to intent,
-          "parameters" to parameters,
-          "result" to "succeeded",
-        )
-      } else {
-        return@runBlocking mapOf(
-          "action" to intent,
-          "parameters" to parameters,
-          "result" to "failed",
-        )
-      }
+      val res = IntentHandler.handleAction(context, intent, parameters)
+      return@runBlocking mapOf("action" to intent, "parameters" to parameters, "result" to res)
     }
   }
 
