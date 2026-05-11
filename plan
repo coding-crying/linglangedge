@@ -1,15 +1,51 @@
 We are using this media edge app as a starting point for an edge version of our mobile language learning application linglang.app. 
 
-There are lots of things we need. but also we need to test along the way.
+There are lots of things we need, but also we need to test along the way.
 
-Beggining features.
+## Phase 1: Google De-google-ing ✅ DONE
 
-Strip out all google analytics and calls to google servers. This app will need to be foss and able to run fully offline (to start) so that means no phoning home to google!
+Strip out all google analytics and calls to google servers. This app will need to be FOSS and able to run fully offline (to start) so that means no phoning home to Google!
 
-Audio test. I want to see if we can input audio in the chat version so users can speak in the language and get a response, more than just a translation or transcription...
+Completed in commit 4df824c:
+- Removed Firebase Analytics (firebase-bom, firebase-analytics, firebase-messaging)
+- Removed google-services plugin
+- Removed FcmMessagingService.kt (push notifications)
+- Replaced FirebaseAnalytics with local GalleryEvent enum (all calls no-op)
+- Removed all logEvent() calls from screens
+- Removed play-services-oss-licenses dep, plugin, and resolution
+- Removed OSS license Activities from manifest and theme styles
+- Removed "Third-party libraries" button from SettingsDialog
+- Stripped FCM/GCM permissions (WAKE_LOCK, RECEIVE_BOOT_COMPLETED, POST_NOTIFICATIONS)
+- Removed Firebase measurement receivers from manifest
+- Removed unused Bundle imports across all screen files
 
-then I am curious to see the tool calling architecture, we may need to redesign the agentic system to use tool calls to make the burden on the edge less hard.
+## Phase 2: Audio Input Test (NEXT)
 
-if the audio input works alright, it would be cool to see if we could also bundle kokoro on the edge for learning english, and then users would need to pay for cloud for more features...
+I want to see if we can input audio in the chat version so users can speak in the language and get a response, more than just a translation or transcription...
 
-here we are mostly testing backend abilities, when it comes time, I will give you more careful instructions as to how we will set up the UI.
+Need to:
+- Test existing audio input in LlmChatScreen
+- Verify HoldToDictateViewModel still works after Firebase stripping
+- Add LingLangTutor voice interaction mode
+
+## Phase 3: Tool-Calling Architecture
+
+I am curious to see the tool calling architecture — we may need to redesign the agentic system to use tool calls to make the burden on the edge less hard.
+
+Need to:
+- Evaluate current AgentTools pattern
+- Design SRS tool calls for the edge (word lookup, grammar check, hint generation)
+- Redesign prompt for second-language interaction
+
+## Phase 4: Kokoro TTS Bundle
+
+If the audio input works alright, it would be cool to see if we could also bundle Kokoro TTS on the edge for learning English, and then users would need to pay for cloud for more features.
+
+## Phase 5: UI Redesign
+
+When it comes time, Will will give more careful instructions as to how we will set up the UI.
+
+## Build Status
+- No local Android SDK — build verification requires Android Studio on another machine
+- All Firebase/GMS references fully stripped from Kotlin source
+- 30 files changed in the de-google commit
