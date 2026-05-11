@@ -1000,6 +1000,15 @@ constructor(
               model.configs = newConfigs
             }
           }
+
+          // Also assign audio-capable models to LingLang Tutor if not already
+          // added via taskTypes (the remote allowlist may not include linglang_tutor).
+          if (model.llmSupportAudio) {
+            val linglangTask = curTasks.find { it.id == BuiltInTaskId.LINGLANG_TUTOR }
+            if (linglangTask != null && linglangTask.models.none { it.name == model.name }) {
+              linglangTask.models.add(model)
+            }
+          }
         }
 
         // Find models from allowlist if a task's `modelNames` field is not empty.
