@@ -1,8 +1,6 @@
 package com.google.ai.edge.gallery.ui.llmchat
 
 import android.content.Context
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.lifecycle.viewModelScope
@@ -15,13 +13,24 @@ import com.google.ai.edge.gallery.ui.common.chat.ChatSide
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.Locale
 import javax.inject.Inject
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 private const val TAG = "LingLangTutor"
+
+/** Mapping from TutorLanguage to Kokoro voice configuration. */
+private val TutorLanguage.kokoroVoice: KokoroVoiceConfig
+  get() = when (this) {
+    TutorLanguage.SPANISH -> KokoroVoiceConfig.ES
+    TutorLanguage.FRENCH -> KokoroVoiceConfig.FR
+    TutorLanguage.GERMAN -> KokoroVoiceConfig.DE
+    TutorLanguage.JAPANESE -> KokoroVoiceConfig.JA
+    TutorLanguage.PORTUGUESE -> KokoroVoiceConfig.PT
+    TutorLanguage.CHINESE -> KokoroVoiceConfig.ZH
+    TutorLanguage.KOREAN -> KokoroVoiceConfig.KO
+    TutorLanguage.ITALIAN -> KokoroVoiceConfig.IT
+  }
 
 /** Supported target languages for the LingLang tutor. */
 enum class TutorLanguage(
@@ -52,41 +61,40 @@ constructor(
   val selectedLanguage = _selectedLanguage.asStateFlow()
 
   private val _isSpeaking = MutableStateFlow(false)
+  /** Whether TTS is currently speaking. Observable by UI. */
   val isSpeaking = _isSpeaking.asStateFlow()
+  /** Whether the Kokoro server is reachable (for UI indicator). */
+  val isKokoroAvailable = MutableStateFlow(false)
 
-  private var tts: TextToSpeech? = null
-  private var ttsInitialized = false
+  private var _kokoroTts: KokoroTtsService? = null
+  private var _context: Context? = null
 
-  /** Initialize Android TTS engine. Call from screen's ApplicationContext. */
+  /** Initialize TTS service. Call from screen's ApplicationContext. */
   fun initTts(context: Context) {
-    if (tts != null) return
-    tts = TextToSpeech(context.applicationContext, { status ->
-      if (status == TextToSpeech.SUCCESS) {
-        ttsInitialized = true
-        updateTtsLanguage()
-        Log.d(TAG, "TTS initialized successfully")
-      } else {
-        Log.e(TAG, "TTS initialization failed: status=$status")
-      }
-    })
-  }
+    if (_kokoroTts != null) return
+    _context = context.applicationContext
+    val tts = KokoroTtsService(context.applicationContext)
+    _kokoroTts = tts
+    tts.init()
 
-  /** Update TTS language to match selected tutor language. */
-  private fun updateTtsLanguage() {
-    val engine = tts ?: return
-    val locale = _selectedLanguage.value.locale
-    val result = engine.setLanguage(locale)
-    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-      Log.w(TAG, "TTS language ${locale.displayLanguage} not supported, falling back to default")
-      engine.setLanguage(Locale.getDefault())
+    // Observe Kokoro speaking state → relay to our own StateFlow
+    viewModelScope.launch {
+      tts.isSpeaking.collect { speaking ->
+        _isSpeaking.value = speaking
+      }
     }
-    engine.setSpeechRate(0.9f) // Slightly slower for language learners
+    // Observe server availability for UI indicator
+    viewModelScope.launch {
+      tts.isServerAvailable.collect { available ->
+        isKokoroAvailable.value = available
+        Log.d(TAG, "Kokoro server available: $available")
+      }
+    }
   }
 
   /** Change the target language and update the system prompt + TTS. */
   fun setLanguage(language: TutorLanguage, task: com.google.ai.edge.gallery.data.Task, model: Model) {
     _selectedLanguage.value = language
-    updateTtsLanguage()
 
     // Update the system prompt to match new language
     val newPrompt = language.systemPromptSuffix
@@ -103,7 +111,7 @@ constructor(
     }
   }
 
-  /** Speak the last agent text message aloud using TTS. */
+  /** Speak the last agent text message aloud using Kokoro TTS. */
   fun speakLastResponse(model: Model) {
     val messages = uiState.value.messagesByModel[model.name] ?: emptyList()
     val lastAgentText = messages.lastOrNull {
@@ -113,45 +121,31 @@ constructor(
     speakText(lastAgentText.content)
   }
 
-  /** Speak arbitrary text. */
+  /** Speak arbitrary text using Kokoro (server) or Android TTS (fallback). */
   fun speakText(text: String) {
-    val engine = tts
-    if (engine == null || !ttsInitialized) {
-      Log.w(TAG, "TTS not initialized, cannot speak")
-      return
+    val lang = _selectedLanguage.value
+    val tts = _kokoroTts ?: return
+    viewModelScope.launch {
+      tts.speak(text, lang.kokoroVoice, lang.locale)
     }
-
-    // Stop any ongoing speech
-    engine.stop()
-
-    engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-      override fun onStart(utteranceId: String?) {
-        _isSpeaking.value = true
-      }
-      override fun onDone(utteranceId: String?) {
-        _isSpeaking.value = false
-      }
-      override fun onError(utteranceId: String?) {
-        _isSpeaking.value = false
-      }
-    })
-
-    val utteranceId = "linglang_${System.currentTimeMillis()}"
-    engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
   }
 
   /** Stop any ongoing TTS speech. */
   fun stopSpeaking() {
-    tts?.stop()
-    _isSpeaking.value = false
+    _kokoroTts?.stopSpeaking()
+  }
+
+  /** Update the Kokoro server URL. */
+  fun updateKokoroServerUrl(url: String) {
+    _kokoroTts?.updateServerUrl(url)
+    viewModelScope.launch {
+      _kokoroTts?.checkServerAvailability()
+    }
   }
 
   /** Clean up TTS resources. */
   fun destroyTts() {
-    tts?.stop()
-    tts?.shutdown()
-    tts = null
-    ttsInitialized = false
+    _kokoroTts?.destroy()
   }
 
   override fun onCleared() {

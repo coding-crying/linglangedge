@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +54,7 @@ fun LingLangTutorScreen(
   val context = LocalContext.current
   val selectedLanguage by viewModel.selectedLanguage.collectAsState()
   val isSpeaking by viewModel.isSpeaking.collectAsState()
+  val isKokoroAvailable by viewModel.isKokoroAvailable.collectAsState()
   val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsState()
   val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
 
@@ -127,13 +130,26 @@ fun LingLangTutorScreen(
           }
         }
 
-        // TTS speak button for the last response
-        if (isSpeaking) {
-          IconButton(onClick = { viewModel.stopSpeaking() }) {
-            Icon(
-              imageVector = Icons.Outlined.Mic,
-              contentDescription = "Stop speaking",
-            )
+        // TTS speak button + Kokoro status indicator
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          // Kokoro server status indicator
+          Icon(
+            imageVector = if (isKokoroAvailable) Icons.Outlined.CloudDone else Icons.Outlined.CloudOff,
+            contentDescription = if (isKokoroAvailable) "Kokoro TTS connected" else "Kokoro TTS offline — using system TTS",
+            tint = if (isKokoroAvailable)
+              androidx.compose.material3.MaterialTheme.colorScheme.primary
+            else
+              androidx.compose.material3.MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(end = 4.dp),
+          )
+
+          if (isSpeaking) {
+            IconButton(onClick = { viewModel.stopSpeaking() }) {
+              Icon(
+                imageVector = Icons.Outlined.Mic,
+                contentDescription = "Stop speaking",
+              )
+            }
           }
         }
       }

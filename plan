@@ -19,14 +19,42 @@ Completed in commit 4df824c:
 - Removed Firebase measurement receivers from manifest
 - Removed unused Bundle imports across all screen files
 
-## Phase 2: Audio Input Test (NEXT)
+## Phase 2: Kokoro TTS Integration (IN PROGRESS)
 
-I want to see if we can input audio in the chat version so users can speak in the language and get a response, more than just a translation or transcription...
+Replace Android's built-in TextToSpeech with Kokoro TTS for high-quality multilingual speech.
+Kokoro provides much better Chinese (Mandarin) voices and consistent quality across languages.
 
-Need to:
-- Test existing audio input in LlmChatScreen
-- Verify HoldToDictateViewModel still works after Firebase stripping
-- Add LingLangTutor voice interaction mode
+Architecture: KokoroTtsService → Kokoro server (primary) → Android TTS (fallback)
+
+### What's been done:
+- Created `KokoroTtsService.kt` — HTTP client for kokoro-fastapi (`/v1/audio/speech` endpoint)
+  - Server-side synthesis via WAV download + AudioTrack playback
+  - Automatic fallback to Android TTS when offline or on server error
+  - Health check on `/health` endpoint to detect server availability
+  - Voice config mapping: TutorLanguage → KokoroVoiceConfig (lang_code + voice name)
+- Refactored `LingLangTutorViewModel.kt` — delegates all TTS to KokoroTtsService
+  - Removed direct TextToSpeech/UtteranceProgressListener usage
+  - Added `isKokoroAvailable` StateFlow for UI status indicator
+  - Speaking state relayed from service → ViewModel → UI
+- Updated `LingLangTutorScreen.kt` — added cloud status indicator (CloudDone/CloudOff icon)
+  - Shows green cloud when Kokoro server is reachable
+  - Shows grey cloud when offline (using system TTS fallback)
+
+### Kokoro models available:
+- **v1.0 ONNX** (onnx-community/Kokoro-82M-v1.0-ONNX): ~86MB q8, 20+ voices, EN+ZH
+- **v1.1-zh ONNX** (onnx-community/Kokoro-82M-v1.1-zh-ONNX): ~127MB int8, 8 zh voices, better Mandarin
+- **Voice packs**: ~0.5MB each. Chinese: zf_xiaobei/xiaoni/xiaoxiao/xiaoyi, zm_yunjian/yunxi/yunxia/yunyang
+- **All Apache 2.0 licensed**
+
+### Remaining for Phase 2:
+- [ ] Add server URL configuration in SettingsDialog (currently hardcoded to 10.0.2.2:8880)
+- [ ] Test end-to-end with kokoro-fastapi running on server
+- [ ] Consider network security config for cleartext HTTP
+
+### Phase 2.5: Audio Input Test (NEXT AFTER TTS)
+- [ ] Test existing audio input in LlmChatScreen
+- [ ] Verify HoldToDictateViewModel still works after Firebase stripping
+- [ ] Add LingLangTutor voice interaction mode
 
 ## Phase 3: Tool-Calling Architecture
 
@@ -37,9 +65,11 @@ Need to:
 - Design SRS tool calls for the edge (word lookup, grammar check, hint generation)
 - Redesign prompt for second-language interaction
 
-## Phase 4: Kokoro TTS Bundle
+## Phase 4: On-Device Kokoro (Future)
 
-If the audio input works alright, it would be cool to see if we could also bundle Kokoro TTS on the edge for learning English, and then users would need to pay for cloud for more features.
+Bundle Kokoro ONNX model for true offline TTS. The kokoro-js package can run in a WebView,
+or we can use ONNX Runtime Android + espeak-ng NDK for native inference. This eliminates
+the server dependency for the English + Chinese freemium tier.
 
 ## Phase 5: UI Redesign
 
