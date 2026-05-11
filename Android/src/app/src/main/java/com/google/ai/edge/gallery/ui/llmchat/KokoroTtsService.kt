@@ -10,9 +10,12 @@ import android.util.Log
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -47,6 +50,7 @@ enum class KokoroVoiceConfig(
  * Phase B: On-device ONNX inference (future work)
  */
 class KokoroTtsService(private val context: Context) {
+  private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
   private val _isSpeaking = MutableStateFlow(false)
   val isSpeaking = _isSpeaking.asStateFlow()
@@ -69,7 +73,7 @@ class KokoroTtsService(private val context: Context) {
   /** Initialize the service. Checks server availability and sets up Android fallback. */
   fun init() {
     initAndroidTts()
-    checkServerAvailability()
+    serviceScope.launch { checkServerAvailability() }
   }
 
   private fun initAndroidTts() {

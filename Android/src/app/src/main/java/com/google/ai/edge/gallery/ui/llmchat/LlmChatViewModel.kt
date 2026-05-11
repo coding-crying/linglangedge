@@ -54,10 +54,10 @@ private const val TAG = "AGLlmChatViewModel"
 
 @OptIn(ExperimentalApi::class)
 open class LlmChatViewModelBase(
-  private val systemPromptRepository: SystemPromptRepository? = null,
+  protected val systemPromptRepository: SystemPromptRepository? = null,
   userDataDataStore: DataStore<UserData>? = null,
 ) : ChatViewModel(userDataDataStore) {
-  private val _uiSystemPrompt = MutableStateFlow("")
+  protected val _uiSystemPrompt = MutableStateFlow("")
   val uiSystemPrompt = _uiSystemPrompt.asStateFlow()
 
   /**

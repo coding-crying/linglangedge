@@ -82,6 +82,7 @@ dependencies {
   implementation(libs.material.icon.extended)
   implementation(libs.androidx.work.runtime)
   implementation(libs.androidx.datastore)
+  implementation("androidx.documentfile:documentfile:1.0.1")
   implementation(libs.com.google.code.gson)
   implementation(libs.androidx.lifecycle.process)
   implementation(libs.androidx.security.crypto)
