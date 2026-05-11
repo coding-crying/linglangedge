@@ -16,7 +16,6 @@
 
 package com.google.ai.edge.gallery.customtasks.agentchat
 
-import android.os.Bundle
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -105,11 +104,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import com.google.ai.edge.gallery.GalleryEvent
+
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.clearFocusOnKeyboardDismiss
 import com.google.ai.edge.gallery.data.MAX_RECOMMENDED_SKILL_COUNT
-import com.google.ai.edge.gallery.firebaseAnalytics
+
 import com.google.ai.edge.gallery.proto.Skill
 import com.google.ai.edge.gallery.ui.common.FloatingBanner
 import com.google.ai.edge.gallery.ui.theme.customColors
@@ -973,13 +972,6 @@ private fun AddSkillOptionsBottomSheet(
               Modifier.fillMaxWidth()
                 .clickable {
                   onOptionSelected(option)
-                  firebaseAnalytics?.logEvent(
-                    GalleryEvent.BUTTON_CLICKED.id,
-                    Bundle().apply {
-                      putString("event_type", "agent_skills_add_skill")
-                      putString("button_id", option.type.toString())
-                    },
-                  )
                   onDismiss()
                 }
                 .padding(horizontal = 16.dp, vertical = 8.dp)

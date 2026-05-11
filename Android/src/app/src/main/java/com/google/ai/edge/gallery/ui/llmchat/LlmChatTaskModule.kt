@@ -324,3 +324,70 @@ internal object LlmAskAudioModule {
     return LlmAskAudioTask()
   }
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// LingLang Tutor.
+
+class LingLangTutorTask @Inject constructor() : CustomTask {
+  override val task: Task =
+    Task(
+      id = BuiltInTaskId.LINGLANG_TUTOR,
+      label = "LingLang Tutor",
+      category = Category.LLM,
+      icon = Icons.Outlined.Mic,
+      models = mutableListOf(),
+      description =
+        "Practice languages through voice conversation. Speak or type and get instant feedback from your AI tutor.",
+      shortDescription = "Voice-based language tutor",
+      docUrl = "https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md",
+      textInputPlaceHolderRes = R.string.linglang_tutor_textinput_placeholder,
+      defaultSystemPrompt = TutorLanguage.SPANISH.systemPromptSuffix,
+    )
+
+  override fun initializeModelFn(
+    context: Context,
+    coroutineScope: CoroutineScope,
+    model: Model,
+    systemInstruction: Contents?,
+    onDone: (String) -> Unit,
+  ) {
+    model.runtimeHelper.initialize(
+      context = context,
+      model = model,
+      taskId = task.id,
+      supportImage = false,
+      supportAudio = true,
+      onDone = onDone,
+      coroutineScope = coroutineScope,
+      systemInstruction = systemInstruction,
+    )
+  }
+
+  override fun cleanUpModelFn(
+    context: Context,
+    coroutineScope: CoroutineScope,
+    model: Model,
+    onDone: () -> Unit,
+  ) {
+    model.runtimeHelper.cleanUp(model = model, onDone = onDone)
+  }
+
+  @Composable
+  override fun MainScreen(data: Any) {
+    val myData = data as CustomTaskDataForBuiltinTask
+    LingLangTutorScreen(
+      modelManagerViewModel = myData.modelManagerViewModel,
+      navigateUp = myData.onNavUp,
+    )
+  }
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+internal object LingLangTutorModule {
+  @Provides
+  @IntoSet
+  fun provideTask(): CustomTask {
+    return LingLangTutorTask()
+  }
+}

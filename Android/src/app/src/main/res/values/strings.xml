@@ -35,6 +35,10 @@
   <string name="askimage_emptystate_content_aicore" translatable="false">To get started, tap the + below to add an image (max 1 image per chat) and type a prompt to ask a question about it!</string>
   <string name="askaudio_emptystate_title" translatable="false">Ask Audio</string>
   <string name="askaudio_emptystate_content" translatable="false">To get started, tap the + below to add a audio clip (limited to 1 clip up to 30 seconds) and type a prompt to transcribe or translate it!</string>
+  <string name="linglang_tutor_emptystate_title" translatable="false">LingLang Tutor</string>
+  <string name="linglang_tutor_emptystate_content" translatable="false">Speak in any language and get instant feedback! Tap the mic to practice pronunciation, or type to chat. Your tutor will respond in the target language.</string>
+  <string name="linglang_tutor_textinput_placeholder" translatable="false">Type or speak to practice…</string>
+  <string name="linglang_tutor_language_label" translatable="false">Language</string>
   <string name="gallery_news_notification_title" translatable="false">Gallery News</string>
   <string name="baseline" translatable="false">Baseline</string>
   <string name="basic_info" translatable="false">Basic info</string>

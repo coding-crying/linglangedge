@@ -25,18 +25,20 @@
         "llm_prompt_lab",
         "llm_agent_chat",
         "llm_ask_image",
-        "llm_ask_audio"
+        "llm_ask_audio",
+        "linglang_tutor"
       ],
       "bestForTaskTypes": [
         "llm_chat",
         "llm_prompt_lab",
         "llm_agent_chat",
         "llm_ask_image",
-        "llm_ask_audio"
+        "llm_ask_audio",
+        "linglang_tutor"
       ],
       "capabilityToTaskTypes": {
-        "llm_thinking": ["llm_chat", "llm_ask_image", "llm_ask_audio"],
-        "speculative_decoding": ["llm_chat", "llm_ask_image", "llm_ask_audio", "llm_prompt_lab"]
+        "llm_thinking": ["llm_chat", "llm_ask_image", "llm_ask_audio", "linglang_tutor"],
+        "speculative_decoding": ["llm_chat", "llm_ask_image", "llm_ask_audio", "llm_prompt_lab", "linglang_tutor"]
       },
       "updatableModelFiles": [
         {
@@ -71,18 +73,20 @@
         "llm_prompt_lab",
         "llm_agent_chat",
         "llm_ask_image",
-        "llm_ask_audio"
+        "llm_ask_audio",
+        "linglang_tutor"
       ],
       "bestForTaskTypes": [
         "llm_chat",
         "llm_prompt_lab",
         "llm_agent_chat",
         "llm_ask_image",
-        "llm_ask_audio"
+        "llm_ask_audio",
+        "linglang_tutor"
       ],
       "capabilityToTaskTypes": {
-        "llm_thinking": ["llm_chat", "llm_ask_image", "llm_ask_audio"],
-        "speculative_decoding": ["llm_chat", "llm_ask_image", "llm_ask_audio", "llm_prompt_lab"]
+        "llm_thinking": ["llm_chat", "llm_ask_image", "llm_ask_audio", "linglang_tutor"],
+        "speculative_decoding": ["llm_chat", "llm_ask_image", "llm_ask_audio", "llm_prompt_lab", "linglang_tutor"]
       },
       "updatableModelFiles": [
         {
@@ -109,8 +113,8 @@
         "maxTokens": 4096,
         "accelerators": "cpu,gpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image", "llm_ask_audio"],
-      "bestForTaskTypes": ["llm_ask_image", "llm_ask_audio"]
+      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image", "llm_ask_audio", "linglang_tutor"],
+      "bestForTaskTypes": ["llm_ask_image", "llm_ask_audio", "linglang_tutor"]
     },
     {
       "name": "Gemma-3n-E4B-it",
@@ -129,7 +133,7 @@
         "maxTokens": 4096,
         "accelerators": "cpu,gpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image", "llm_ask_audio"]
+      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image", "llm_ask_audio", "linglang_tutor"]
     },
     {
       "name": "Gemma3-1B-IT",

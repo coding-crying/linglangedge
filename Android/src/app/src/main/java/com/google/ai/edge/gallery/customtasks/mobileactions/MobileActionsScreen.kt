@@ -18,7 +18,7 @@ package com.google.ai.edge.gallery.customtasks.mobileactions
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.res.Resources
-import android.os.Bundle
+
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -113,11 +113,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import com.google.ai.edge.gallery.GalleryEvent
+
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
-import com.google.ai.edge.gallery.firebaseAnalytics
+
 import com.google.ai.edge.gallery.ui.common.MarkdownText
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageWarning
 import com.google.ai.edge.gallery.ui.common.chat.MessageBodyLoading
@@ -410,14 +410,7 @@ fun MainUi(
         },
       )
 
-      firebaseAnalytics?.logEvent(
-        GalleryEvent.GENERATE_ACTION.id,
-        Bundle().apply {
-          putString("capability_name", task.id)
-          putString("model_id", model.name)
-        },
-      )
-    }
+      }
 
     Box(modifier = Modifier.fillMaxSize()) {
       Column(

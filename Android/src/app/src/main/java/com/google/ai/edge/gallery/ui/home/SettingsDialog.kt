@@ -16,7 +16,7 @@
 
 package com.google.ai.edge.gallery.ui.home
 
-import com.google.android.gms.oss.licenses.OssLicensesMenuActivity
+
 import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
@@ -291,23 +291,8 @@ fun SettingsDialog(
             }
           }
 
-          // Third party licenses.
-          Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-            Text(
-              "Third-party libraries",
-              style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
-            )
-            OutlinedButton(
-              onClick = {
-                // Create an Intent to launch a license viewer that displays a list of
-                // third-party library names. Clicking a name will show its license content.
-                val intent = Intent(context, OssLicensesMenuActivity::class.java)
-                context.startActivity(intent)
-              }
-            ) {
-              Text("View licenses")
-            }
-          }
+          // Third party licenses — removed Google OSS Licenses for FOSS build.
+          // TODO: Add a local licenses viewer (e.g. show bundled NOTICE/LICENSE files)
 
           // Tos
           Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {

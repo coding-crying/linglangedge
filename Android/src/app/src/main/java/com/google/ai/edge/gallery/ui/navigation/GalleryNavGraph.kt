@@ -16,7 +16,6 @@
 
 package com.google.ai.edge.gallery.ui.navigation
 
-import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -69,13 +68,13 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import com.google.ai.edge.gallery.GalleryEvent
+
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskData
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTask
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.isLegacyTasks
-import com.google.ai.edge.gallery.firebaseAnalytics
+
 import com.google.ai.edge.gallery.ui.benchmark.BenchmarkScreen
 import com.google.ai.edge.gallery.ui.common.ErrorDialog
 import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
@@ -202,10 +201,6 @@ fun GalleryNavHost(
               pickedTask = task
               enableModelListAnimation = true
               navController.navigate(ROUTE_MODEL_LIST)
-              firebaseAnalytics?.logEvent(
-                GalleryEvent.CAPABILITY_SELECT.id,
-                Bundle().apply { putString("capability_name", task.id) },
-              )
             },
             onModelsClicked = { navController.navigate(ROUTE_MODEL_MANAGER) },
             gm4 = true,
@@ -275,10 +270,6 @@ fun GalleryNavHost(
             navController.navigate("$ROUTE_MODEL/${it.id}/${model.name}")
           },
           onBenchmarkClicked = { model ->
-            firebaseAnalytics?.logEvent(
-              GalleryEvent.CAPABILITY_SELECT.id,
-              Bundle().apply { putString("capability_name", "benchmark_${model.name}") },
-            )
             navController.navigate("$ROUTE_BENCHMARK/${model.name}")
           },
           navigateUp = {
@@ -408,10 +399,6 @@ fun GalleryNavHost(
           navController.navigate("$ROUTE_MODEL/${task.id}/${model.name}")
         },
         onBenchmarkClicked = { model ->
-          firebaseAnalytics?.logEvent(
-            GalleryEvent.CAPABILITY_SELECT.id,
-            Bundle().apply { putString("capability_name", "benchmark_${model.name}") },
-          )
           navController.navigate("$ROUTE_BENCHMARK/${model.name}")
         },
       )

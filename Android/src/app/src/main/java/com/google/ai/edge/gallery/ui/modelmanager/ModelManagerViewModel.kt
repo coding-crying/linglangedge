@@ -174,6 +174,7 @@ private val PREDEFINED_LLM_TASK_ORDER =
   listOf(
     BuiltInTaskId.LLM_ASK_IMAGE,
     BuiltInTaskId.LLM_ASK_AUDIO,
+    BuiltInTaskId.LINGLANG_TUTOR,
     BuiltInTaskId.LLM_CHAT,
     BuiltInTaskId.LLM_AGENT_CHAT,
     BuiltInTaskId.LLM_PROMPT_LAB,
@@ -637,6 +638,7 @@ constructor(
         BuiltInTaskId.LLM_CHAT,
         BuiltInTaskId.LLM_ASK_IMAGE,
         BuiltInTaskId.LLM_ASK_AUDIO,
+        BuiltInTaskId.LINGLANG_TUTOR,
         BuiltInTaskId.LLM_PROMPT_LAB,
         BuiltInTaskId.LLM_TINY_GARDEN,
         BuiltInTaskId.LLM_MOBILE_ACTIONS,
@@ -652,10 +654,12 @@ constructor(
       if (
         (task.id == BuiltInTaskId.LLM_ASK_IMAGE && model.llmSupportImage) ||
           (task.id == BuiltInTaskId.LLM_ASK_AUDIO && model.llmSupportAudio) ||
+          (task.id == BuiltInTaskId.LINGLANG_TUTOR && model.llmSupportAudio) ||
           (task.id == BuiltInTaskId.LLM_TINY_GARDEN && model.llmSupportTinyGarden) ||
           (task.id == BuiltInTaskId.LLM_MOBILE_ACTIONS && model.llmSupportMobileActions) ||
           (task.id != BuiltInTaskId.LLM_ASK_IMAGE &&
             task.id != BuiltInTaskId.LLM_ASK_AUDIO &&
+            task.id != BuiltInTaskId.LINGLANG_TUTOR &&
             task.id != BuiltInTaskId.LLM_TINY_GARDEN &&
             task.id != BuiltInTaskId.LLM_MOBILE_ACTIONS)
       ) {
@@ -1143,6 +1147,7 @@ constructor(
       }
       if (model.llmSupportAudio) {
         tasks.get(key = BuiltInTaskId.LLM_ASK_AUDIO)?.models?.add(model)
+        tasks.get(key = BuiltInTaskId.LINGLANG_TUTOR)?.models?.add(model)
       }
       if (model.llmSupportTinyGarden) {
         tasks.get(key = BuiltInTaskId.LLM_TINY_GARDEN)?.models?.add(model)
@@ -1216,6 +1221,7 @@ constructor(
           BuiltInTaskId.LLM_CHAT,
           BuiltInTaskId.LLM_ASK_IMAGE,
           BuiltInTaskId.LLM_ASK_AUDIO,
+          BuiltInTaskId.LINGLANG_TUTOR,
         )
     }
     if (llmSupportSpeculativeDecoding) {
@@ -1225,6 +1231,7 @@ constructor(
           BuiltInTaskId.LLM_CHAT,
           BuiltInTaskId.LLM_ASK_IMAGE,
           BuiltInTaskId.LLM_ASK_AUDIO,
+          BuiltInTaskId.LINGLANG_TUTOR,
           BuiltInTaskId.LLM_PROMPT_LAB,
         )
     }

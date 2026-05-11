@@ -13,28 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.google.ai.edge.gallery
 
-import android.util.Log
-import com.google.firebase.Firebase
-import com.google.firebase.analytics.FirebaseAnalytics
-import com.google.firebase.analytics.analytics
-
-private var hasLoggedAnalyticsWarning = false
-
-val firebaseAnalytics: FirebaseAnalytics?
-  get() =
-    runCatching { Firebase.analytics }
-      .onFailure { exception ->
-        // Firebase.analytics can throw an exception if goolgle-services is not set up, e.g.,
-        // missing google-services.json.
-        if (!hasLoggedAnalyticsWarning) {
-          Log.w("AGAnalyticsFirebase", "Firebase Analytics is not available", exception)
-        }
-      }
-      .getOrNull()
-
+// Firebase Analytics removed for LingLang FOSS build.
+// All analytics calls are no-ops. GalleryEvent kept for logErrorToFirebase signature compat.
 enum class GalleryEvent(val id: String) {
   CAPABILITY_SELECT(id = "capability_select"),
   MODEL_DOWNLOAD(id = "model_download"),

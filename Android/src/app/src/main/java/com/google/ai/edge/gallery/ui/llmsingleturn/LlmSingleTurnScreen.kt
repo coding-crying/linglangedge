@@ -47,11 +47,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.core.os.bundleOf
-import com.google.ai.edge.gallery.GalleryEvent
+
+
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
-import com.google.ai.edge.gallery.firebaseAnalytics
+
 import com.google.ai.edge.gallery.ui.common.ErrorDialog
 import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
 import com.google.ai.edge.gallery.ui.common.chat.ModelDownloadStatusInfoPanel
@@ -176,11 +176,6 @@ fun LlmSingleTurnScreen(
               modelManagerViewModel = modelManagerViewModel,
               onSend = { fullPrompt ->
                 viewModel.generateResponse(task = task, model = selectedModel, input = fullPrompt)
-
-                firebaseAnalytics?.logEvent(
-                  GalleryEvent.GENERATE_ACTION.id,
-                  bundleOf("capability_name" to task.id, "model_id" to selectedModel.name),
-                )
               },
               onStopButtonClicked = { model -> viewModel.stopResponse(model = model) },
               modifier = Modifier.fillMaxSize(),
