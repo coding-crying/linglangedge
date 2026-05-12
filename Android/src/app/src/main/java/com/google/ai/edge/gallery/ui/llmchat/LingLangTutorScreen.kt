@@ -11,16 +11,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material.icons.outlined.CloudDone
-import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,14 +28,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
-import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.ui.theme.emptyStateContent
 import com.google.ai.edge.gallery.ui.theme.emptyStateTitle
 
@@ -51,17 +45,9 @@ fun LingLangTutorScreen(
   modifier: Modifier = Modifier,
   viewModel: LingLangTutorViewModel = hiltViewModel(),
 ) {
-  val context = LocalContext.current
   val selectedLanguage by viewModel.selectedLanguage.collectAsState()
-  val isSpeaking by viewModel.isSpeaking.collectAsState()
-  val isKokoroAvailable by viewModel.isKokoroAvailable.collectAsState()
   val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsState()
   val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
-
-  // Initialize TTS and system prompt on first composition
-  LaunchedEffect(Unit) {
-    viewModel.initTts(context)
-  }
 
   // Load system prompt for the LingLang task
   val task = remember {
@@ -107,7 +93,7 @@ fun LingLangTutorScreen(
             onValueChange = {},
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
-            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
           )
           ExposedDropdownMenu(
             expanded = languageExpanded,
@@ -125,29 +111,6 @@ fun LingLangTutorScreen(
                     }
                   }
                 },
-              )
-            }
-          }
-        }
-
-        // TTS speak button + Kokoro status indicator
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          // Kokoro server status indicator
-          Icon(
-            imageVector = if (isKokoroAvailable) Icons.Outlined.CloudDone else Icons.Outlined.CloudOff,
-            contentDescription = if (isKokoroAvailable) "Kokoro TTS connected" else "Kokoro TTS offline — using system TTS",
-            tint = if (isKokoroAvailable)
-              androidx.compose.material3.MaterialTheme.colorScheme.primary
-            else
-              androidx.compose.material3.MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(end = 4.dp),
-          )
-
-          if (isSpeaking) {
-            IconButton(onClick = { viewModel.stopSpeaking() }) {
-              Icon(
-                imageVector = Icons.Outlined.Mic,
-                contentDescription = "Stop speaking",
               )
             }
           }
@@ -175,10 +138,6 @@ fun LingLangTutorScreen(
         },
         showImagePicker = false,
         showAudioPicker = true,
-        onGenerateResponseDone = { model ->
-          // Auto-speak the response after generation completes
-          viewModel.speakLastResponse(model)
-        },
         emptyStateComposable = { model ->
           Box(modifier = Modifier.fillMaxSize()) {
             Column(

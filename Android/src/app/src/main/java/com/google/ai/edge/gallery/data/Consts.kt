@@ -55,7 +55,7 @@ const val MAX_IMAGE_COUNT_AI_CORE = 1
 const val MAX_RECOMMENDED_SKILL_COUNT = 15
 
 // Max number of audio clip in an "ask audio" session.
-const val MAX_AUDIO_CLIP_COUNT = 1
+const val MAX_AUDIO_CLIP_COUNT = 10
 
 // Max audio clip duration in seconds.
 const val MAX_AUDIO_CLIP_DURATION_SEC = 30
