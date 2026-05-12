@@ -22,15 +22,15 @@ enum class TutorLanguage(
   val locale: Locale,
   val systemPromptSuffix: String,
 ) {
-  SPANISH("Español", "es", Locale("es"), "You are a Spanish language tutor. Respond in Spanish. Correct mistakes gently and keep the conversation going."),
-  FRENCH("Français", "fr", Locale("fr"), "You are a French language tutor. Respond in French. Correct mistakes gently and keep the conversation going."),
-  GERMAN("Deutsch", "de", Locale("de"), "You are a German language tutor. Respond in German. Correct mistakes gently and keep the conversation going."),
-  RUSSIAN("Русский", "ru", Locale("ru"), "You are a Russian language tutor. Respond in Russian. Correct mistakes gently and keep the conversation going."),
-  JAPANESE("日本語", "ja", Locale("ja"), "You are a Japanese language tutor. Respond in Japanese. Correct mistakes gently and keep the conversation going."),
-  PORTUGUESE("Português", "pt", Locale("pt"), "You are a Portuguese language tutor. Respond in Portuguese. Correct mistakes gently and keep the conversation going."),
-  CHINESE("中文", "zh", Locale("zh"), "You are a Chinese (Mandarin) language tutor. Respond in simplified Chinese. Correct mistakes gently and keep the conversation going."),
-  KOREAN("한국어", "ko", Locale("ko"), "You are a Korean language tutor. Respond in Korean. Correct mistakes gently and keep the conversation going."),
-  ITALIAN("Italiano", "it", Locale("it"), "You are an Italian language tutor. Respond in Italian. Correct mistakes gently and keep the conversation going."),
+  SPANISH("Español", "es", Locale("es"), "Respond in Spanish."),
+  FRENCH("Français", "fr", Locale("fr"), "Respond in French."),
+  GERMAN("Deutsch", "de", Locale("de"), "Respond in German."),
+  RUSSIAN("Русский", "ru", Locale("ru"), "Respond in Russian."),
+  JAPANESE("日本語", "ja", Locale("ja"), "Respond in Japanese."),
+  PORTUGUESE("Português", "pt", Locale("pt"), "Respond in Portuguese."),
+  CHINESE("中文", "zh", Locale("zh"), "Respond in simplified Chinese."),
+  KOREAN("한국어", "ko", Locale("ko"), "Respond in Korean."),
+  ITALIAN("Italiano", "it", Locale("it"), "Respond in Italian."),
 }
 
 @HiltViewModel
