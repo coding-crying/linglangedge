@@ -40,6 +40,8 @@ import androidx.exifinterface.media.ExifInterface
 import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.data.SAMPLE_RATE
 import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import java.io.File
 import java.io.FileInputStream
 import java.net.HttpURLConnection
@@ -350,6 +352,10 @@ fun isPixel10(): Boolean {
   return Build.MODEL != null && Build.MODEL.lowercase().contains("pixel 10")
 }
 
+fun isPixelDevice(): Boolean {
+  return Build.MODEL != null && Build.MODEL.lowercase().contains("pixel")
+}
+
 fun Modifier.clearFocusOnKeyboardDismiss(): Modifier = composed {
   var isFocused by remember { mutableStateOf(false) }
   var keyboardAppearedSinceLastFocused by remember { mutableStateOf(false) }
@@ -383,4 +389,12 @@ fun isAICoreSupported(allowedDeviceModels: Set<String>?): Boolean {
 
 fun logErrorToFirebase(event: GalleryEvent, errorType: String, errorMessage: String?) {
   // Firebase removed — no-op for FOSS build
+}
+
+fun convertStringToJsonObject(jsonString: String): JsonObject {
+  return try {
+    JsonParser.parseString(jsonString).asJsonObject
+  } catch (e: Exception) {
+    JsonObject()
+  }
 }

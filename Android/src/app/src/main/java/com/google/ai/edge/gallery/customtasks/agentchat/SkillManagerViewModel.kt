@@ -24,14 +24,12 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Email
-import androidx.compose.material.icons.outlined.Kitchen
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.LocalLibrary
 import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.QrCode
-import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.outlined.SentimentVerySatisfied
-import androidx.compose.material.icons.outlined.Tag
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -44,7 +42,6 @@ import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.data.SkillAllowlist
 
 import com.google.ai.edge.gallery.proto.Skill
-import com.google.ai.edge.litertlm.Contents
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -73,28 +70,10 @@ val TRYOUT_CHIPS: List<SkillTryOutChip> =
       skillName = "interactive-map",
     ),
     SkillTryOutChip(
-      icon = Icons.Outlined.Kitchen,
-      label = "Kitchen Adventure",
-      prompt = "Start kitchen adventure",
-      skillName = "kitchen-adventure",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.Tag,
-      label = "Calculate Hash",
-      prompt = "What is the sha1 hash of \"gemma\"?",
-      skillName = "calculate-hash",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.ScreenRotation,
-      label = "Text Spinner",
-      prompt = "Spin \"Gemma\" on my head",
-      skillName = "text-spinner",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.Email,
-      label = "Send Email",
-      prompt = "Send email 'Good morning' to abc@example.com. Content: 'Any plans for tonight?'",
-      skillName = "send-email",
+      icon = Icons.Outlined.Notifications,
+      label = "Schedule Reminder",
+      prompt = "Set a daily reminder at 9am to check my schedule for today.",
+      skillName = "schedule-notification",
     ),
     SkillTryOutChip(
       icon = Icons.Outlined.SentimentVerySatisfied,
@@ -102,6 +81,12 @@ val TRYOUT_CHIPS: List<SkillTryOutChip> =
       prompt =
         "Log yesterday's mood as 2 because it was raining quite heavily, and log today's mood as 9 because I had a great time playing pickleball again. Then show me my mood dashboard.",
       skillName = "mood-tracker",
+    ),
+    SkillTryOutChip(
+      icon = Icons.Outlined.Lightbulb,
+      label = "Learn something new",
+      prompt = "I want to learn something new!",
+      skillName = "learn-something-new",
     ),
     SkillTryOutChip(
       icon = Icons.Outlined.LocalLibrary,
@@ -164,10 +149,10 @@ constructor(
     }
   }
 
-  fun loadSkills(onDone: () -> Unit) {
+  suspend fun loadSkills() {
     if (!skillLoaded) {
       setLoading(true)
-      viewModelScope.launch(Dispatchers.IO) {
+      withContext(Dispatchers.IO) {
         Log.d(TAG, "Loading skills index...")
 
         // 1. Load all skills from DataStore.
@@ -184,7 +169,9 @@ constructor(
         )
 
         // 2. Keep track of the selection state of existing built-in skills.
-        val builtInSelectionMap = dataStoreBuiltInSkills.associate { it.name to it.selected }
+        val builtInSelectionMap = dataStoreBuiltInSkills.associate {
+          it.name to Pair(it.selected, it.userModifiedSelection)
+        }
         Log.d(TAG, "data store built-in skills selection map: $builtInSelectionMap")
 
         // 3. Read and parse SKILL.md files from assets/skills directories.
@@ -192,10 +179,6 @@ constructor(
         try {
           val skillAssetDirs = context.assets.list("skills") ?: emptyArray()
           for (dirName in skillAssetDirs) {
-            // Temporarily disable this skill in built-in skills.
-            if (dirName == "create-calendar-event") {
-              continue
-            }
             val skillMdPath = "skills/$dirName/SKILL.md"
             try {
               context.assets.open(skillMdPath).use { inputStream ->
@@ -212,10 +195,19 @@ constructor(
                   Log.w(TAG, "Error parsing asset skill $dirName: ${errors.joinToString(", ")}")
                 } else {
                   skillProto?.let {
-                    // Apply the previous selection state if it exists, otherwise default to
-                    // true.
-                    val selectedState = builtInSelectionMap[it.name] ?: true
-                    builtInSkills.add(it.toBuilder().setSelected(selectedState).build())
+                    // Apply the previous selection state if the user explicitly modified it,
+                    // otherwise use the default selection state.
+                    val defaultSelected = it.name !in DEFAULT_DISABLED_SKILLS
+                    val (persistedSelected, userModified) =
+                      builtInSelectionMap[it.name] ?: Pair(defaultSelected, false)
+                    val selectedState = if (userModified) persistedSelected else defaultSelected
+                    builtInSkills.add(
+                      it
+                        .toBuilder()
+                        .setSelected(selectedState)
+                        .setUserModifiedSelection(userModified)
+                        .build()
+                    )
                     Log.d(TAG, "Added built-in skill: ${it.name}")
                   }
                 }
@@ -250,10 +242,7 @@ constructor(
 
         setLoading(false)
         skillLoaded = true
-        withContext(Dispatchers.Default) { onDone() }
       }
-    } else {
-      onDone()
     }
   }
 
@@ -711,25 +700,6 @@ constructor(
 
   fun getSelectedSkills(): List<Skill> {
     return _uiState.value.skills.filter { it.skill.selected }.map { it.skill }
-  }
-
-  fun injectSkills(baseSystemPrompt: String): Contents {
-    // Replace ___SKILLS___ with the following skills list:
-    //
-    // - skill_name_1: skill_description_1
-    // - skill_name_2: skill_description_2
-    // - skill_name_3: skill_description_3
-    val selectedSkillsNamesAndDescriptions = getSelectedSkillsNamesAndDescriptions()
-    val systemPrompt =
-      if (selectedSkillsNamesAndDescriptions.isBlank()) {
-        // If no skills are selected, silently discard the system prompt entirely.
-        // TODO: b/509944016 - Improve this fallback behavior.
-        ""
-      } else {
-        baseSystemPrompt.replace("___SKILLS___", selectedSkillsNamesAndDescriptions)
-      }
-    Log.d(TAG, "System prompt:\n$systemPrompt")
-    return Contents.of(systemPrompt)
   }
 
   fun getSkill(name: String): Skill? {
@@ -1205,12 +1175,6 @@ constructor(
         putString("skill_name", skillName)
         putString("skill_id", getSkillShortId(skill))
       }
-    if (
-      skill.skillUrl.isNotEmpty() &&
-        (source == SkillSource.REMOTE_URL || source == SkillSource.FEATURED)
-    ) {
-      bundle.putString("remote_url", skill.skillUrl.take(100))
-    }
     return bundle
   }
 
@@ -1218,6 +1182,11 @@ constructor(
     val normalizedDirName = originalImportDirName.replace("\\s+".toRegex(), "-")
     val newImportDirName = "skills/${normalizedDirName}"
     return context.filesDir.resolve(newImportDirName)
+  }
+
+  companion object {
+    private val DEFAULT_DISABLED_SKILLS =
+      setOf("calculate-hash", "kitchen-adventure", "text-spinner", "send-email")
   }
 }
 

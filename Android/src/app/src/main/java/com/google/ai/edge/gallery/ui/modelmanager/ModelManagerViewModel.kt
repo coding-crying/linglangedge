@@ -279,12 +279,12 @@ constructor(
   }
 
   fun updateConfigValuesUpdateTrigger() {
-    _uiState.update { _uiState.value.copy(configValuesUpdateTrigger = System.currentTimeMillis()) }
+    _uiState.update { it.copy(configValuesUpdateTrigger = System.currentTimeMillis()) }
   }
 
   fun selectModel(model: Model) {
     if (_uiState.value.selectedModel.name != model.name) {
-      _uiState.update { _uiState.value.copy(selectedModel = model) }
+      _uiState.update { it.copy(selectedModel = model) }
     }
   }
 
@@ -398,13 +398,13 @@ constructor(
       }
       dataStoreRepository.saveImportedModels(importedModels = importedModels)
     }
-    val newUiState =
-      uiState.value.copy(
+    _uiState.update {
+      it.copy(
         modelDownloadStatus = curModelDownloadStatus,
-        tasks = uiState.value.tasks.toList(),
+        tasks = it.tasks.toList(),
         modelImportingUpdateTrigger = System.currentTimeMillis(),
       )
-    _uiState.update { newUiState }
+    }
   }
 
   fun initializeModel(
@@ -529,8 +529,6 @@ constructor(
     // Update model download progress.
     val curModelDownloadStatus = uiState.value.modelDownloadStatus.toMutableMap()
     curModelDownloadStatus[curModel.name] = status
-    val newUiState = uiState.value.copy(modelDownloadStatus = curModelDownloadStatus)
-
     // Delete downloaded file if status is failed or not_downloaded.
     if (
       status.status == ModelDownloadStatusType.FAILED ||
@@ -539,7 +537,7 @@ constructor(
       deleteFileFromExternalFilesDir(curModel.downloadFileName)
     }
 
-    _uiState.update { newUiState }
+    _uiState.update { it.copy(modelDownloadStatus = curModelDownloadStatus) }
   }
 
   fun setInitializationStatus(model: Model, status: ModelInitializationStatus) {
@@ -558,7 +556,7 @@ constructor(
           initializedBackends
         }
       curStatus[model.name] = status.copy(initializedBackends = newInitializedBackends)
-      _uiState.update { _uiState.value.copy(modelInitializationStatus = curStatus) }
+      _uiState.update { it.copy(modelInitializationStatus = curStatus) }
     }
   }
 
@@ -569,7 +567,7 @@ constructor(
       if (newHistory.size > TEXT_INPUT_HISTORY_MAX_SIZE) {
         newHistory.removeAt(newHistory.size - 1)
       }
-      _uiState.update { _uiState.value.copy(textInputHistory = newHistory) }
+      _uiState.update { it.copy(textInputHistory = newHistory) }
       dataStoreRepository.saveTextInputHistory(_uiState.value.textInputHistory)
     } else {
       promoteTextInputHistoryItem(text)
@@ -582,7 +580,7 @@ constructor(
       val newHistory = uiState.value.textInputHistory.toMutableList()
       newHistory.removeAt(index)
       newHistory.add(0, text)
-      _uiState.update { _uiState.value.copy(textInputHistory = newHistory) }
+      _uiState.update { it.copy(textInputHistory = newHistory) }
       dataStoreRepository.saveTextInputHistory(_uiState.value.textInputHistory)
     }
   }
@@ -592,13 +590,13 @@ constructor(
     if (index >= 0) {
       val newHistory = uiState.value.textInputHistory.toMutableList()
       newHistory.removeAt(index)
-      _uiState.update { _uiState.value.copy(textInputHistory = newHistory) }
+      _uiState.update { it.copy(textInputHistory = newHistory) }
       dataStoreRepository.saveTextInputHistory(_uiState.value.textInputHistory)
     }
   }
 
   fun clearTextInputHistory() {
-    _uiState.update { _uiState.value.copy(textInputHistory = mutableListOf()) }
+    _uiState.update { it.copy(textInputHistory = mutableListOf()) }
     dataStoreRepository.saveTextInputHistory(_uiState.value.textInputHistory)
   }
 
@@ -688,8 +686,8 @@ constructor(
 
     // Update ui state.
     _uiState.update {
-      uiState.value.copy(
-        tasks = uiState.value.tasks.toList(),
+      it.copy(
+        tasks = it.tasks.toList(),
         modelDownloadStatus = modelDownloadStatus,
         modelInitializationStatus = modelInstances,
         modelImportingUpdateTrigger = System.currentTimeMillis(),
@@ -893,9 +891,7 @@ constructor(
   }
 
   fun loadModelAllowlist() {
-    _uiState.update {
-      uiState.value.copy(loadingModelAllowlist = true, loadingModelAllowlistError = "")
-    }
+    _uiState.update { it.copy(loadingModelAllowlist = true, loadingModelAllowlistError = "") }
 
     viewModelScope.launch(Dispatchers.IO) {
       try {
@@ -938,9 +934,7 @@ constructor(
         }
 
         if (modelAllowlist == null) {
-          _uiState.update {
-            uiState.value.copy(loadingModelAllowlistError = "Failed to load model list")
-          }
+          _uiState.update { it.copy(loadingModelAllowlistError = "Failed to load model list") }
           return@launch
         }
 
@@ -1445,8 +1439,7 @@ constructor(
         error = error,
         initializedBackends = newInitializedBackends,
       )
-    val newUiState = uiState.value.copy(modelInitializationStatus = curModelInstance)
-    _uiState.update { newUiState }
+    _uiState.update { it.copy(modelInitializationStatus = curModelInstance) }
   }
 
   @androidx.annotation.VisibleForTesting

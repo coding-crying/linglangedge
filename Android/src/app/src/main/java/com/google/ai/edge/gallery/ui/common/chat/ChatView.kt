@@ -22,32 +22,39 @@ package com.google.ai.edge.gallery.ui.common.chat
 // import com.google.ai.edge.gallery.ui.theme.GalleryTheme
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -66,21 +73,31 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
+import com.google.ai.edge.gallery.ui.common.copyBitmapToClipboard
+import com.google.ai.edge.gallery.ui.common.saveBitmapToMediaStore
+import com.google.ai.edge.gallery.ui.common.shareBitmap
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
+import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAG = "AGChatView"
 
@@ -105,10 +122,19 @@ fun ChatView(
   onBenchmarkClicked: (Model, ChatMessage, Int, Int) -> Unit,
   navigateUp: () -> Unit,
   modifier: Modifier = Modifier,
-  onResetSessionClicked: (Model) -> Unit = {},
+  skillCount: Int = 0,
+  mcpCount: Int = 0,
+  onResetSessionClicked:
+    (
+      model: Model, initialMessages: List<ChatMessage>, clearHistory: Boolean, onDone: () -> Unit,
+    ) -> Unit =
+    { _, _, _, onDone ->
+      onDone()
+    },
   onStreamImageMessage: (Model, ChatMessageImage) -> Unit = { _, _ -> },
   onStopButtonClicked: (Model) -> Unit = {},
   onSkillClicked: () -> Unit = {},
+  onMcpClicked: () -> Unit = {},
   showStopButtonInInputWhenInProgress: Boolean = false,
   composableBelowMessageList: @Composable (Model) -> Unit = {},
   showImagePicker: Boolean = false,
@@ -127,6 +153,7 @@ fun ChatView(
   var selectedImageIndex by remember { mutableIntStateOf(-1) }
   var allImageViewerImages by remember { mutableStateOf<List<Bitmap>>(listOf()) }
   var showImageViewer by remember { mutableStateOf(false) }
+  val snackbarHostState = remember { SnackbarHostState() }
 
   // Chat history drawer.
   val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -135,7 +162,6 @@ fun ChatView(
     remember(allHistorySessions, task.id) { allHistorySessions.filter { it.taskId == task.id } }
 
   val context = LocalContext.current
-  var feedFullHistoryOnNextMessage by remember { mutableStateOf(false) }
 
   val currentMessages = uiState.messagesByModel[selectedModel.name] ?: emptyList()
   LaunchedEffect(uiState.inProgress) {
@@ -145,6 +171,7 @@ fun ChatView(
         messages = currentMessages,
         originalModel = selectedModel.name,
         taskId = task.id,
+        context = context,
       )
     }
   }
@@ -184,7 +211,9 @@ fun ChatView(
       modelManagerUiState.modelInitializationStatus[selectedModel.name]
     val isModelInitializing =
       modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZING
-    if (!isModelInitializing && !uiState.inProgress) {
+    if (drawerState.isOpen) {
+      scope.launch { drawerState.close() }
+    } else if (!isModelInitializing && !uiState.inProgress) {
       handleNavigateUp()
     }
   }
@@ -200,23 +229,65 @@ fun ChatView(
               onHistoryItemClicked = { sessionId ->
                 val session = historySessions.firstOrNull { it.sessionId == sessionId }
                 if (session != null) {
-                  onResetSessionClicked(selectedModel)
-                  viewModel.clearAllMessages(selectedModel)
+                  Log.d(
+                    TAG,
+                    "Analytics: chat_history, action=load_past_chat, capability_name=${task.id}, model_id=${selectedModel.name}, model_version=${selectedModel.version}",
+                  )
+                  firebaseAnalytics?.logEvent(
+                    GalleryEvent.CHAT_HISTORY.id,
+                    Bundle().apply {
+                      putString("action", "load_past_chat")
+                      putString("capability_name", task.id)
+                      putString("model_id", selectedModel.name)
+                      putString("model_version", selectedModel.version)
+                    },
+                  )
 
-                  val messages = deserializeProtoMessages(session.messagesList)
-                  for (msg in messages) {
-                    viewModel.addMessage(selectedModel, msg)
+                  scope.launch {
+                    viewModel.setIsResettingSession(true)
+                    val messages =
+                      withContext(Dispatchers.IO) { deserializeProtoMessages(session.messagesList) }
+                    viewModel.clearAllMessages(selectedModel)
+                    for (msg in messages) {
+                      viewModel.addMessage(selectedModel, msg)
+                    }
+                    onResetSessionClicked(selectedModel, messages, /* clearHistory= */ false) {
+                      viewModel.setIsResettingSession(false)
+                    }
+                    viewModel.currentSessionId = session.sessionId
                   }
-
-                  viewModel.currentSessionId = session.sessionId
-                  feedFullHistoryOnNextMessage = true
                 }
                 scope.launch { drawerState.close() }
               },
-              onHistoryItemDeleted = { sessionId -> viewModel.deleteSession(sessionId) },
-              onHistoryItemsDeleteAll = { viewModel.clearAllSessions() },
+              onHistoryItemDeleted = { sessionId ->
+                viewModel.deleteSession(sessionId, context)
+                if (sessionId == viewModel.currentSessionId) {
+                  onResetSessionClicked(selectedModel, emptyList(), /* clearHistory= */ true) {}
+                  viewModel.currentSessionId = UUID.randomUUID().toString()
+                }
+              },
+              onHistoryItemsDeleteAll = {
+                viewModel.clearAllSessions(context)
+                onResetSessionClicked(selectedModel, emptyList(), /* clearHistory= */ true) {}
+                viewModel.currentSessionId = UUID.randomUUID().toString()
+                scope.launch { drawerState.close() }
+              },
               onNewChatClicked = {
-                onResetSessionClicked(selectedModel)
+                Log.d(
+                  TAG,
+                  "Analytics: chat_history, action=click_new_chat, capability_name=${task.id}, model_id=${selectedModel.name}, model_version=${selectedModel.version}",
+                )
+                firebaseAnalytics?.logEvent(
+                  GalleryEvent.CHAT_HISTORY.id,
+                  Bundle().apply {
+                    putString("action", "click_new_chat")
+                    putString("capability_name", task.id)
+                    putString("model_id", selectedModel.name)
+                    putString("model_version", selectedModel.version)
+                  },
+                )
+
+                onResetSessionClicked(selectedModel, emptyList(), /* clearHistory= */ true) {}
                 viewModel.currentSessionId = UUID.randomUUID().toString()
                 scope.launch { drawerState.close() }
               },
@@ -230,6 +301,7 @@ fun ChatView(
       CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Scaffold(
           modifier = modifier,
+          snackbarHost = { SnackbarHost(snackbarHostState) },
           topBar = {
             ModelPageAppBar(
               task = task,
@@ -268,7 +340,22 @@ fun ChatView(
               allowEditingSystemPrompt = allowEditingSystemPrompt,
               curSystemPrompt = curSystemPrompt,
               onSystemPromptChanged = onSystemPromptChanged,
-              onHistoryClicked = { scope.launch { drawerState.open() } },
+              onHistoryClicked = {
+                Log.d(
+                  TAG,
+                  "Analytics: chat_history, action=click_history_tab, capability_name=${task.id}, model_id=${selectedModel.name}, model_version=${selectedModel.version}",
+                )
+                firebaseAnalytics?.logEvent(
+                  GalleryEvent.CHAT_HISTORY.id,
+                  Bundle().apply {
+                    putString("action", "click_history_tab")
+                    putString("capability_name", task.id)
+                    putString("model_id", selectedModel.name)
+                    putString("model_version", selectedModel.version)
+                  },
+                )
+                scope.launch { drawerState.open() }
+              },
             )
           },
         ) { innerPadding ->
@@ -292,39 +379,10 @@ fun ChatView(
                       selectedModel = selectedModel,
                       viewModel = viewModel,
                       innerPadding = innerPadding,
+                      skillCount = skillCount,
+                      mcpCount = mcpCount,
                       navigateUp = navigateUp,
-                      // TODO(zichuanwei): Update the logic here to use the proper litertlm api.
-                      // the current logic is to be compatible with AICore logic, as AI core doesn't
-                      // support message preloading or multi-turn conversations.
-                      onSendMessage = { model, messages ->
-                        if (feedFullHistoryOnNextMessage) {
-                          feedFullHistoryOnNextMessage = false
-                          val history = uiState.messagesByModel[model.name] ?: emptyList()
-                          val originalShortMessage = messages.lastOrNull() as? ChatMessageText
-                          val combinedMessage =
-                            if (originalShortMessage != null) {
-                              buildFirstMessageWithHistory(history, originalShortMessage)
-                            } else null
-                          if (combinedMessage != null) {
-                            val modifiedList = messages.dropLast(1) + combinedMessage
-                            onSendMessage(model, modifiedList)
-
-                            // Revert the visible UI message back to the short one
-                            scope.launch(Dispatchers.Default) {
-                              delay(100)
-                              viewModel.replaceLastMessage(
-                                model,
-                                originalShortMessage!!,
-                                ChatMessageType.TEXT,
-                              )
-                            }
-                          } else {
-                            onSendMessage(model, messages)
-                          }
-                        } else {
-                          onSendMessage(model, messages)
-                        }
-                      },
+                      onSendMessage = { model, messages -> onSendMessage(model, messages) },
                       onRunAgainClicked = onRunAgainClicked,
                       onBenchmarkClicked = onBenchmarkClicked,
                       onStreamImageMessage = onStreamImageMessage,
@@ -344,6 +402,7 @@ fun ChatView(
                         showImageViewer = true
                       },
                       onSkillClicked = onSkillClicked,
+                      onMcpClicked = onMcpClicked,
                       modifier = Modifier.weight(1f),
                       showStopButtonInInputWhenInProgress = showStopButtonInInputWhenInProgress,
                       showImagePicker = showImagePicker,
@@ -362,47 +421,148 @@ fun ChatView(
             }
 
             // Image viewer.
-            AnimatedVisibility(
-              visible = showImageViewer,
-              enter = slideInVertically(initialOffsetY = { fullHeight -> fullHeight }) + fadeIn(),
-              exit = slideOutVertically(targetOffsetY = { fullHeight -> fullHeight }) + fadeOut(),
-            ) {
-              val pagerState =
-                rememberPagerState(
-                  pageCount = { allImageViewerImages.size },
-                  initialPage = selectedImageIndex,
-                )
-              val scrollEnabled = remember { mutableStateOf(true) }
-              Box(
-                modifier = Modifier.fillMaxSize().padding(top = innerPadding.calculateTopPadding())
+            if (showImageViewer) {
+              Dialog(
+                onDismissRequest = { showImageViewer = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
               ) {
-                HorizontalPager(
-                  state = pagerState,
-                  userScrollEnabled = scrollEnabled.value,
-                  modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.95f)),
-                ) { page ->
-                  allImageViewerImages[page].let { image ->
-                    ZoomableImage(
-                      bitmap = image.asImageBitmap(),
-                      pagerState = pagerState,
-                      modifier = Modifier.fillMaxSize(),
-                    )
+                val dialogSnackbarHostState = remember { SnackbarHostState() }
+                val pagerState =
+                  rememberPagerState(
+                    pageCount = { allImageViewerImages.size },
+                    initialPage = selectedImageIndex,
+                  )
+                val scrollEnabled = remember { mutableStateOf(true) }
+                Box(modifier = Modifier.fillMaxSize()) {
+                  HorizontalPager(
+                    state = pagerState,
+                    userScrollEnabled = scrollEnabled.value,
+                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.95f)),
+                  ) { page ->
+                    allImageViewerImages[page].let { image ->
+                      ZoomableImage(
+                        bitmap = image.asImageBitmap(),
+                        pagerState = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                      )
+                    }
                   }
-                }
 
-                // Close button.
-                IconButton(
-                  onClick = { showImageViewer = false },
-                  colors =
-                    IconButtonDefaults.iconButtonColors(
-                      containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                  modifier = Modifier.offset(x = (-8).dp, y = 8.dp).align(Alignment.TopEnd),
-                ) {
-                  Icon(
-                    Icons.Rounded.Close,
-                    contentDescription = stringResource(R.string.cd_close_image_viewer_icon),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                  val curBitmap = allImageViewerImages.getOrNull(pagerState.currentPage)
+
+                  // Top item: ArrowBack (top left).
+                  Row(
+                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                  ) {
+                    IconButton(onClick = { showImageViewer = false }) {
+                      Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = stringResource(R.string.close),
+                        tint = Color.White,
+                      )
+                    }
+                  }
+
+                  // Bottom items: Share, Copy, Save.
+                  val copySuccessMsg = stringResource(R.string.snackbar_copy_to_clipboard_success)
+                  val saveSuccessMsg = stringResource(R.string.snackbar_save_to_album_success)
+                  val saveFailedMsg = stringResource(R.string.snackbar_save_to_album_failed)
+                  Row(
+                    modifier =
+                      Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(bottom = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                  ) {
+                    // Share button
+                    IconButton(
+                      onClick = {
+                        curBitmap?.let { bitmap -> scope.launch { context.shareBitmap(bitmap) } }
+                      },
+                      modifier = Modifier.size(64.dp),
+                    ) {
+                      Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                          Icons.Rounded.Share,
+                          contentDescription = stringResource(R.string.share),
+                          tint = Color.White,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                          text = stringResource(R.string.share),
+                          color = Color.White,
+                          fontSize = 12.sp,
+                          textAlign = TextAlign.Center,
+                        )
+                      }
+                    }
+
+                    // Copy button
+                    IconButton(
+                      onClick = {
+                        curBitmap?.let { bitmap ->
+                          scope.launch {
+                            context.copyBitmapToClipboard(bitmap)
+                            dialogSnackbarHostState.showSnackbar(copySuccessMsg)
+                          }
+                        }
+                      },
+                      modifier = Modifier.size(64.dp),
+                    ) {
+                      Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                          Icons.Rounded.ContentCopy,
+                          contentDescription = stringResource(R.string.copy),
+                          tint = Color.White,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                          text = stringResource(R.string.copy),
+                          color = Color.White,
+                          fontSize = 12.sp,
+                          textAlign = TextAlign.Center,
+                        )
+                      }
+                    }
+
+                    // Save button
+                    IconButton(
+                      onClick = {
+                        curBitmap?.let { bitmap ->
+                          scope.launch {
+                            val success =
+                              context.saveBitmapToMediaStore(
+                                bitmap,
+                                "chat_image_${System.currentTimeMillis()}.png",
+                              )
+                            if (success) {
+                              dialogSnackbarHostState.showSnackbar(saveSuccessMsg)
+                            } else {
+                              dialogSnackbarHostState.showSnackbar(saveFailedMsg)
+                            }
+                          }
+                        }
+                      },
+                      modifier = Modifier.size(64.dp),
+                    ) {
+                      Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                          Icons.Rounded.Download,
+                          contentDescription = stringResource(R.string.save),
+                          tint = Color.White,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                          text = stringResource(R.string.save),
+                          color = Color.White,
+                          fontSize = 12.sp,
+                          textAlign = TextAlign.Center,
+                        )
+                      }
+                    }
+                  }
+                  SnackbarHost(
+                    hostState = dialogSnackbarHostState,
+                    modifier = Modifier.align(Alignment.BottomCenter),
                   )
                 }
               }
@@ -495,6 +655,37 @@ private fun deserializeProtoMessages(
       "INFO" -> ChatMessageInfo(protoMsg.content)
       "WARNING" -> ChatMessageWarning(protoMsg.content)
       "ERROR" -> ChatMessageError(protoMsg.content)
+      "IMAGE" -> {
+        val bitmaps =
+          protoMsg.imageFilePathsList.mapNotNull { path -> BitmapFactory.decodeFile(path) }
+        if (bitmaps.isNotEmpty()) {
+          ChatMessageImage(
+            bitmaps = bitmaps,
+            imageBitMaps = bitmaps.map { it.asImageBitmap() },
+            side = side,
+            latencyMs = protoMsg.latencyMs,
+            accelerator = protoMsg.accelerator,
+            hideSenderLabel = protoMsg.hideSenderLabel,
+            persistedPaths = protoMsg.imageFilePathsList.toList(),
+          )
+        } else null
+      }
+      "AUDIO_CLIP" -> {
+        val firstAudio = protoMsg.audioClipsList.firstOrNull()
+        if (firstAudio != null) {
+          try {
+            ChatMessageAudioClip(
+              audioData = File(firstAudio.filePath).readBytes(),
+              sampleRate = firstAudio.sampleRate,
+              side = side,
+              latencyMs = protoMsg.latencyMs,
+              persistedPath = firstAudio.filePath,
+            )
+          } catch (e: Exception) {
+            null
+          }
+        } else null
+      }
       else -> null
     }
   }

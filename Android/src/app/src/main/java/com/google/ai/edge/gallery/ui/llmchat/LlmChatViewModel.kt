@@ -41,6 +41,7 @@ import com.google.ai.edge.gallery.ui.common.chat.ChatViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.ToolProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -56,6 +57,7 @@ private const val TAG = "AGLlmChatViewModel"
 open class LlmChatViewModelBase(
   protected val systemPromptRepository: SystemPromptRepository? = null,
   userDataDataStore: DataStore<UserData>? = null,
+  private val modelFeedbackRepository: Any? = null,
 ) : ChatViewModel(userDataDataStore) {
   protected val _uiSystemPrompt = MutableStateFlow("")
   val uiSystemPrompt = _uiSystemPrompt.asStateFlow()
@@ -347,10 +349,14 @@ open class LlmChatViewModelBase(
     supportAudio: Boolean = false,
     onDone: () -> Unit = {},
     enableConversationConstrainedDecoding: Boolean = false,
+    initialMessages: List<Message> = listOf(),
+    clearHistory: Boolean = true,
   ) {
     viewModelScope.launch(Dispatchers.Default) {
       setIsResettingSession(true)
-      clearAllMessages(model = model)
+      if (clearHistory) {
+        clearAllMessages(model = model)
+      }
       stopResponse(model = model)
 
       while (true) {
@@ -362,6 +368,7 @@ open class LlmChatViewModelBase(
             systemInstruction = systemInstruction,
             tools = tools,
             enableConversationConstrainedDecoding = enableConversationConstrainedDecoding,
+            initialMessages = initialMessages,
           )
           break
         } catch (e: Exception) {
@@ -440,7 +447,7 @@ class LlmChatViewModel
 constructor(
   systemPromptRepository: SystemPromptRepository,
   userDataDataStore: DataStore<UserData>,
-) : LlmChatViewModelBase(systemPromptRepository, userDataDataStore)
+) : LlmChatViewModelBase(systemPromptRepository, userDataDataStore, null)
 
 @HiltViewModel
 class LlmAskImageViewModel
@@ -448,7 +455,7 @@ class LlmAskImageViewModel
 constructor(
   systemPromptRepository: SystemPromptRepository,
   userDataDataStore: DataStore<UserData>,
-) : LlmChatViewModelBase(systemPromptRepository, userDataDataStore)
+) : LlmChatViewModelBase(systemPromptRepository, userDataDataStore, null)
 
 @HiltViewModel
 class LlmAskAudioViewModel
@@ -456,4 +463,4 @@ class LlmAskAudioViewModel
 constructor(
   systemPromptRepository: SystemPromptRepository,
   userDataDataStore: DataStore<UserData>,
-) : LlmChatViewModelBase(systemPromptRepository, userDataDataStore)
+  ) : LlmChatViewModelBase(systemPromptRepository, userDataDataStore, null)

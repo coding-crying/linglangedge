@@ -89,7 +89,7 @@ fun ClickableLink(
       text = annotatedText,
       textAlign = textAlign,
       style = MaterialTheme.typography.bodyMedium,
-      modifier = Modifier.padding(start = 6.dp),
+      modifier = Modifier.padding(start = if (icon != null) 6.dp else 0.dp),
     )
   }
 }
