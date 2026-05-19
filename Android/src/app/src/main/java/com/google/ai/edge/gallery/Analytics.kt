@@ -16,7 +16,10 @@
 package com.google.ai.edge.gallery
 
 // Firebase Analytics removed for LingLang FOSS build.
-// All analytics calls are no-ops. GalleryEvent kept for logErrorToFirebase signature compat.
+// All analytics calls are no-ops via nullable firebaseAnalytics.
+// GalleryEvent kept for signature compatibility.
+val firebaseAnalytics: Nothing? = null
+
 enum class GalleryEvent(val id: String) {
   CAPABILITY_SELECT(id = "capability_select"),
   MODEL_DOWNLOAD(id = "model_download"),
