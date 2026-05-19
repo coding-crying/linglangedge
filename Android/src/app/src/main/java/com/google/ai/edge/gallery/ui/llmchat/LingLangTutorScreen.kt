@@ -9,15 +9,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
+
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.IconButton
+
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -47,7 +52,16 @@ fun LingLangTutorScreen(
 ) {
   val selectedLanguage by viewModel.selectedLanguage.collectAsState()
   val uiSystemPrompt by viewModel.uiSystemPrompt.collectAsState()
+  val ttsEnabled by viewModel.ttsEnabled.collectAsState()
+  val isListening by viewModel.isListening.collectAsState()
   val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
+
+  val context = LocalContext.current
+
+  // Initialize TTS on first composition
+  LaunchedEffect(Unit) {
+    viewModel.initTts(context)
+  }
 
   // Load system prompt for the LingLang task
   val task = remember {
@@ -60,12 +74,9 @@ fun LingLangTutorScreen(
     }
   }
 
-  // Language picker dropdown state
-  var languageExpanded by remember { mutableStateOf(false) }
-
   Box(modifier = modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
-      // Language switcher bar
+      // Top bar: language label + TTS toggle
       Row(
         modifier = Modifier
           .fillMaxWidth()
@@ -79,41 +90,20 @@ fun LingLangTutorScreen(
           modifier = Modifier.padding(end = 8.dp),
         )
         Text(
-          text = stringResource(R.string.linglang_tutor_language_label),
+          text = "English",
           style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
         )
         Spacer(modifier = Modifier.width(8.dp))
 
-        ExposedDropdownMenuBox(
-          expanded = languageExpanded,
-          onExpandedChange = { languageExpanded = !languageExpanded },
+        // TTS toggle button
+        IconButton(
+          onClick = { viewModel.toggleTts() },
+          modifier = Modifier.size(40.dp),
         ) {
-          OutlinedTextField(
-            value = selectedLanguage.displayName,
-            onValueChange = {},
-            readOnly = true,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
-            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+          Icon(
+            imageVector = if (ttsEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+            contentDescription = if (ttsEnabled) "TTS on" else "TTS off",
           )
-          ExposedDropdownMenu(
-            expanded = languageExpanded,
-            onDismissRequest = { languageExpanded = false },
-          ) {
-            TutorLanguage.entries.forEach { lang ->
-              DropdownMenuItem(
-                text = { Text(lang.displayName) },
-                onClick = {
-                  languageExpanded = false
-                  if (lang != selectedLanguage && task != null) {
-                    val selectedModel = modelManagerViewModel.uiState.value.selectedModel
-                    if (selectedModel != null) {
-                      viewModel.setLanguage(lang, task, selectedModel)
-                    }
-                  }
-                },
-              )
-            }
-          }
         }
       }
 

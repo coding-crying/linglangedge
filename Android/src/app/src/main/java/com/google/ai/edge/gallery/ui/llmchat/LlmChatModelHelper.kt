@@ -133,27 +133,73 @@ object LlmChatModelHelper : LlmModelHelper {
       // Ignore exceptions and assume not supported.
     }
     // Create an instance of LiteRT LM engine and conversation.
-    try {
-      var speculativeDecoding = false
-      // Check if the model supports speculative decoding for the given task type and if the
-      // speculative decoding is enabled in the settings.
-      if (
-        supportsSpeculativeDecoding &&
-          model.capabilityToTaskTypes[ModelCapability.SPECULATIVE_DECODING]?.contains(taskId) ==
-            true
-      ) {
-        speculativeDecoding =
-          model.getBooleanConfigValue(
-            key = ConfigKeys.ENABLE_SPECULATIVE_DECODING,
-            defaultValue = false,
-          )
-      }
-      ExperimentalFlags.enableSpeculativeDecoding = speculativeDecoding
-      Log.d(TAG, "Speculative decoding enabled: $speculativeDecoding")
-      val engine = Engine(engineConfig)
-      engine.initialize()
-      ExperimentalFlags.enableSpeculativeDecoding = false
+    // Retry up to 3 times with GC + delay between attempts — GPU shader cache can cause
+    // "Failed to create engine: INTERNAL error" after multiple sessions without this.
+    var speculativeDecoding = false
+    // Check if the model supports speculative decoding for the given task type and if the
+    // speculative decoding is enabled in the settings.
+    if (
+      supportsSpeculativeDecoding &&
+        model.capabilityToTaskTypes[ModelCapability.SPECULATIVE_DECODING]?.contains(taskId) ==
+          true
+    ) {
+      speculativeDecoding =
+        model.getBooleanConfigValue(
+          key = ConfigKeys.ENABLE_SPECULATIVE_DECODING,
+          defaultValue = false,
+        )
+    }
+    ExperimentalFlags.enableSpeculativeDecoding = speculativeDecoding
+    Log.d(TAG, "Speculative decoding enabled: $speculativeDecoding")
 
+    var engine: Engine? = null
+    var lastError: Exception? = null
+    val maxRetries = 3
+    for (attempt in 1..maxRetries) {
+      try {
+        Log.d(TAG, "Creating engine (attempt $attempt/$maxRetries) with backend $preferredBackend")
+        engine = Engine(engineConfig)
+        engine.initialize()
+        lastError = null
+        break
+      } catch (e: Exception) {
+        lastError = e
+        Log.w(TAG, "Engine creation attempt $attempt failed: ${e.message}")
+        if (attempt < maxRetries) {
+          // Force GPU resource cleanup and retry
+          System.gc()
+          Thread.sleep(1000L * attempt)
+        }
+      }
+    }
+    ExperimentalFlags.enableSpeculativeDecoding = false
+
+    // If GPU/NPU failed after all retries, fall back to CPU
+    if (lastError != null && engine == null && preferredBackend !is Backend.CPU) {
+      Log.w(TAG, "All $maxRetries attempts failed with $preferredBackend. Falling back to CPU.")
+      try {
+        val cpuConfig = EngineConfig(
+          modelPath = modelPath,
+          backend = Backend.CPU(),
+          maxNumTokens = maxTokens,
+          cacheDir = if (modelPath.startsWith("/data/local/tmp"))
+            context.getExternalFilesDir(null)?.absolutePath else null,
+        )
+        engine = Engine(cpuConfig)
+        engine.initialize()
+        lastError = null
+      } catch (e: Exception) {
+        lastError = e
+        Log.e(TAG, "CPU fallback also failed: ${e.message}")
+      }
+    }
+
+    if (lastError != null || engine == null) {
+      onDone(cleanUpMediapipeTaskErrorMessage(lastError?.message ?: "Unknown error"))
+      return
+    }
+
+    try {
       ExperimentalFlags.enableConversationConstrainedDecoding =
         enableConversationConstrainedDecoding
       val conversation =

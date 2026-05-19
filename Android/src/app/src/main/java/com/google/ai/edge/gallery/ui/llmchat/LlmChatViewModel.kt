@@ -61,6 +61,23 @@ open class LlmChatViewModelBase(
   val uiSystemPrompt = _uiSystemPrompt.asStateFlow()
 
   /**
+   * Optional hook for subclasses to receive each streaming partial result token.
+   * Called with each token as it arrives from the LLM, before UI update.
+   * Used by LingLangTutorViewModel for streaming TTS.
+   */
+  var partialResultSink: ((String) -> Unit)? = null
+
+  /**
+   * Called when LLM generation starts (first message sent).
+   */
+  var onGenerationStart: (() -> Unit)? = null
+
+  /**
+   * Called when LLM generation completes.
+   */
+  var onGenerationEnd: (() -> Unit)? = null
+
+  /**
    * Sets the system prompt in the UI.
    *
    * This method updates the UI system prompt without saving it to the repository or resetting the
@@ -132,6 +149,9 @@ open class LlmChatViewModelBase(
       setInProgress(true)
       setPreparing(true)
 
+      // Notify TTS that generation is starting
+      onGenerationStart?.invoke()
+
       // Loading.
       addMessage(model = model, message = ChatMessageLoading(accelerator = accelerator))
 
@@ -156,6 +176,8 @@ open class LlmChatViewModelBase(
             if (partialResult.startsWith("<ctrl")) {
               // Do nothing. Ignore control tokens.
             } else {
+              // Forward to TTS sink if set (streaming TTS for LingLang)
+              partialResultSink?.invoke(partialResult)
               // Remove the last message if it is a "loading" message.
               // This will only be done once.
               val lastMessage = getLastMessage(model = model)
@@ -263,6 +285,7 @@ open class LlmChatViewModelBase(
                   }
                 }
                 setInProgress(false)
+                onGenerationEnd?.invoke()
                 onDone()
               }
             }

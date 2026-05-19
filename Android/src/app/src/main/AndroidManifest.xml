@@ -44,7 +44,7 @@
 
     <application
         android:name="${applicationName}"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="${appIcon}"
@@ -84,6 +84,13 @@
                 <data android:scheme="com.google.ai.edge.gallery" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name="com.google.ai.edge.gallery.linglang.OnboardingActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Gallery"
+            android:screenOrientation="portrait"
+            android:configChanges="uiMode" />
 
         
 

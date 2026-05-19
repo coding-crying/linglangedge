@@ -341,7 +341,7 @@ class LingLangTutorTask @Inject constructor() : CustomTask {
       shortDescription = "Voice-based language tutor",
       docUrl = "https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md",
       textInputPlaceHolderRes = R.string.linglang_tutor_textinput_placeholder,
-      defaultSystemPrompt = TutorLanguage.SPANISH.systemPromptSuffix,
+      defaultSystemPrompt = TutorLanguage.ENGLISH.systemPromptSuffix,
     )
 
   override fun initializeModelFn(

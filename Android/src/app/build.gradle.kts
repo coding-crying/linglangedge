@@ -65,6 +65,10 @@ android {
     compose = true
     buildConfig = true
   }
+  // Prevent re-compression of large model files so they can be memory-mapped directly
+  aaptOptions {
+    noCompress("onnx", "bin")
+  }
 }
 
 dependencies {
@@ -104,6 +108,12 @@ dependencies {
   implementation(libs.hilt.navigation.compose)
   implementation(libs.androidx.exifinterface)
   implementation(libs.moshi.kotlin)
+  implementation(libs.onnxruntime.android)
+  implementation(libs.retrofit)
+  implementation(libs.retrofit.moshi)
+  implementation(libs.okhttp)
+  implementation(libs.okhttp.logging)
+  implementation(files("libs/android-vad-webrtc-v2.0.9.aar"))
   kapt(libs.hilt.android.compiler)
   testImplementation(libs.junit)
   androidTestImplementation(libs.androidx.junit)
