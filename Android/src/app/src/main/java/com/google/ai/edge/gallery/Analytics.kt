@@ -16,9 +16,15 @@
 package com.google.ai.edge.gallery
 
 // Firebase Analytics removed for LingLang FOSS build.
-// All analytics calls are no-ops via nullable firebaseAnalytics.
-// GalleryEvent kept for signature compatibility.
-val firebaseAnalytics: Nothing? = null
+// Stub class so firebaseAnalytics?.logEvent() compiles as no-op.
+// All calls become safe no-ops since the value is always null.
+import android.os.Bundle
+
+class FirebaseAnalyticsStub {
+  fun logEvent(name: String, bundle: Bundle) { /* no-op */ }
+}
+
+val firebaseAnalytics: FirebaseAnalyticsStub? = null
 
 enum class GalleryEvent(val id: String) {
   CAPABILITY_SELECT(id = "capability_select"),
