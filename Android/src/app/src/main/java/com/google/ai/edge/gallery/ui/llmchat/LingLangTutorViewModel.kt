@@ -71,12 +71,18 @@ constructor(
   companion object {
     private const val USER_ID = "user_1"
     private const val GOALS_UPDATE_INTERVAL_TURNS = 5
+    /** Auto-reset conversation context after this many assistant turns to prevent context overflow. */
+    private const val MAX_TURNS_BEFORE_RESET = 6
   }
 
   private var contextManager: ContextManager? = null
   private var turnCount = 0
   private var sessionStartTime: Long = 0L
   private var sessionActive = false
+
+  /** Track current task/model for auto-reset. */
+  private var currentTask: Task? = null
+  private var currentModel: Model? = null
 
   /** Accumulates the full LLM response for metadata parsing after generation ends. */
   private val responseBuffer = StringBuilder()
@@ -138,6 +144,12 @@ constructor(
     partialResultSink = { token -> onToken(token) }
     onGenerationStart = { this@LingLangTutorViewModel.onGenerationStart() }
     onGenerationEnd = { this@LingLangTutorViewModel.onGenerationEnd() }
+
+    // Strip <lang-metadata> blocks from chat UI display so they don't consume
+    // context budget in the on-device model's conversation history.
+    displayContentFilter = { content ->
+      LangMetadataParser.stripMetadataTags(content)
+    }
 
     player.warmUp()
 
@@ -217,6 +229,8 @@ constructor(
   /**
    * Signal generation end.  Parses the accumulated response to extract
    * metadata, update SRS, and periodically update goals.
+   * Also auto-resets conversation context every MAX_TURNS_BEFORE_RESET turns
+   * to prevent on-device model context overflow.
    */
   fun onGenerationEnd() {
     // Always forward — flushes any buffered text and resets player state.
@@ -224,6 +238,34 @@ constructor(
 
     // Parse the full accumulated response for metadata
     processResponseMetadata()
+
+    // Auto-reset conversation context to prevent context overflow on
+    // the on-device model. After MAX_TURNS_BEFORE_RESET assistant turns,
+    // start a fresh conversation with the enriched system prompt so the
+    // model retains the learning context but discards stale history.
+    if (turnCount >= MAX_TURNS_BEFORE_RESET) {
+      val task = currentTask
+      val model = currentModel
+      val language = _selectedLanguage.value
+      if (task != null && model != null) {
+        Log.i(TAG, "Auto-resetting conversation after $turnCount turns")
+        turnCount = 0
+        val contextualPrompt = buildContextualSystemPrompt(language.systemPromptSuffix)
+        _uiSystemPrompt.value = contextualPrompt
+        viewModelScope.launch {
+          systemPromptRepository?.updateSystemPrompt(task.id, language.systemPromptSuffix)
+          resetSession(
+            task = task,
+            model = model,
+            systemInstruction = Contents.of(contextualPrompt),
+            supportImage = false,
+            supportAudio = true,
+          )
+        }
+      } else {
+        Log.w(TAG, "Cannot auto-reset: task=$task, model=$model")
+      }
+    }
   }
 
   /**
@@ -321,6 +363,10 @@ constructor(
   fun setLanguage(language: TutorLanguage, task: Task, model: Model) {
     _selectedLanguage.value = language
     ttsPlayer?.setVoice(language.kokoroVoiceId)
+
+    // Track for auto-reset
+    currentTask = task
+    currentModel = model
 
     // Build context-enriched system prompt
     val basePrompt = language.systemPromptSuffix

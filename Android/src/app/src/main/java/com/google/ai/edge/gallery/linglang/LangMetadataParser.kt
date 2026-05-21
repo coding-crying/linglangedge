@@ -133,7 +133,7 @@ data class VoicePerformance(
 
 object LangMetadataParser {
 
-    private val METADATA_REGEX = Regex("""<lang-metadata>(.*?)</lang-metadata>""", RegexOption.DOT_MATCHES_ALL)
+    val METADATA_REGEX = Regex("""<lang-metadata>(.*?)</lang-metadata>""", RegexOption.DOT_MATCHES_ALL)
 
     /** Lenient JSON instance – the LLM may emit slightly broken JSON. */
     private val json: Json = Json {
@@ -184,4 +184,13 @@ object LangMetadataParser {
      */
     fun toVoicePerformances(metadata: LangMetadata): List<VoicePerformance> =
         metadata.errors.map { VoicePerformance.fromLangError(it) }
+
+    /**
+     * Strip all `<lang-metadata>` blocks from a raw string, returning
+     * only the natural-text portion. Useful for cleaning content before
+     * displaying it in the chat UI or feeding it into the on-device
+     * model's conversation context.
+     */
+    fun stripMetadataTags(raw: String): String =
+        METADATA_REGEX.replace(raw, "").trim()
 }

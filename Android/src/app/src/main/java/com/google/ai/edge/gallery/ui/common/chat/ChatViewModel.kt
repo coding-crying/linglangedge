@@ -69,6 +69,14 @@ data class ChatUiState(
 abstract class ChatViewModel(val userDataDataStore: DataStore<UserData>? = null) : ViewModel() {
   var currentSessionId: String = UUID.randomUUID().toString()
 
+  /**
+   * Optional content filter for the chat UI display. Applied to each partial
+   * result before updating the chat message content. Used by subclasses to
+   * strip machine-readable tags (e.g. <lang-metadata>) that should not appear
+   * in the user-visible conversation.
+   */
+  var displayContentFilter: ((String) -> String)? = null
+
   private val _uiState = MutableStateFlow(createUiState())
   val uiState = _uiState.asStateFlow()
 
@@ -186,7 +194,9 @@ abstract class ChatViewModel(val userDataDataStore: DataStore<UserData>? = null)
     if (newMessages.isNotEmpty()) {
       val lastMessage = newMessages.last()
       if (lastMessage is ChatMessageText) {
-        val newContent = processLlmResponse(response = "${lastMessage.content}${partialContent}")
+        var newContent = processLlmResponse(response = "${lastMessage.content}${partialContent}")
+        // Apply display content filter if set (e.g. strip <lang-metadata> tags)
+        newContent = displayContentFilter?.invoke(newContent) ?: newContent
         val newLastMessage =
           ChatMessageText(
             content = newContent,

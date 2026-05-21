@@ -2,8 +2,11 @@ package com.google.ai.edge.gallery.tts
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -42,6 +45,29 @@ class StreamingTtsPlayer(private val context: Context) {
 
     // Audio playback
     private var audioTrack: AudioTrack? = null
+
+    // Audio focus management
+    private val audioManager by lazy { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var hasAudioFocus = false
+
+    private val onFocusChange = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                hasAudioFocus = false
+                // Another app took focus — pause playback gracefully
+                stop()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // Lower volume would be ideal but AudioTrack doesn't support
+                // ducking easily; just keep playing at full volume for speech.
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                hasAudioFocus = true
+            }
+        }
+    }
 
     // TTS state observation
     private val _ttsState = MutableSharedFlow<TtsState>(replay = 1)
@@ -176,6 +202,7 @@ class StreamingTtsPlayer(private val context: Context) {
     private fun startPlaybackLoop() {
         isPlaying = true
         _ttsState.tryEmit(TtsState.Playing)
+        requestAudioFocus()
         scope.launch {
             while (isActive && (sentenceQueue.isNotEmpty() || isGenerating)) {
                 var sentence = sentenceQueue.poll()
@@ -187,7 +214,7 @@ class StreamingTtsPlayer(private val context: Context) {
                 // Merge short fragments (<15 chars) with the next queued chunk
                 // to avoid TTS overhead on tiny audio clips like "Yes,"
                 while (sentence.length < 15 && sentenceQueue.isNotEmpty()) {
-                    sentence = "$sentence ${sentenceQueue.poll()}"
+                    sentence = "$sentence ${sentenceQueue.poll() ?: ""}"
                 }
 
                 try {
@@ -201,6 +228,7 @@ class StreamingTtsPlayer(private val context: Context) {
             }
             isPlaying = false
             _ttsState.tryEmit(TtsState.Idle)
+            releaseAudioFocus()
             Log.d(TAG, "Playback loop ended")
         }
     }
@@ -227,11 +255,68 @@ class StreamingTtsPlayer(private val context: Context) {
         // Create AudioTrack if needed (24kHz mono 16-bit)
         val track = ensureAudioTrack() ?: return
 
+        // Start playback after first write to avoid silent buffer issues on some devices
+        if (track.state == AudioTrack.STATE_INITIALIZED && track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+            track.play()
+        }
+
         // Write samples — blocks until consumed, giving natural backpressure
         val written = track.write(pcm, 0, pcm.size)
         if (written < 0) {
             Log.e(TAG, "AudioTrack.write failed: $written")
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun requestAudioFocus() {
+        if (hasAudioFocus) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setOnAudioFocusChangeListener(onFocusChange)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .build()
+                audioFocusRequest = request
+                val result = audioManager.requestAudioFocus(request)
+                hasAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } else {
+                val result = audioManager.requestAudioFocus(
+                    onFocusChange,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                )
+                hasAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            }
+            Log.d(TAG, "Audio focus requested, granted=$hasAudioFocus")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to request audio focus", e)
+            // Proceed without focus — playback may still work
+            hasAudioFocus = true
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun releaseAudioFocus() {
+        if (!hasAudioFocus) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioFocusRequest?.let { request ->
+                    audioManager.abandonAudioFocusRequest(request)
+                    audioFocusRequest = null
+                }
+            } else {
+                audioManager.abandonAudioFocus(onFocusChange)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to release audio focus", e)
+        }
+        hasAudioFocus = false
+        Log.d(TAG, "Audio focus released")
     }
 
     private fun ensureAudioTrack(): AudioTrack? {
@@ -261,7 +346,8 @@ class StreamingTtsPlayer(private val context: Context) {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
-        track.play()
+        // Don't call play() here — defer until first PCM data is written
+        // to avoid silent-buffer issues on some Android devices
         audioTrack = track
         return track
     }
@@ -274,5 +360,6 @@ class StreamingTtsPlayer(private val context: Context) {
             } catch (_: Exception) {}
         }
         audioTrack = null
+        releaseAudioFocus()
     }
 }
