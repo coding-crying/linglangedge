@@ -136,7 +136,7 @@ open class LlmChatViewModelBase(
     }
   }
 
-  fun generateResponse(
+  open fun generateResponse(
     model: Model,
     input: String,
     images: List<Bitmap> = listOf(),

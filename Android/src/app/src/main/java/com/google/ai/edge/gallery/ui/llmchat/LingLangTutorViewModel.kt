@@ -1,6 +1,7 @@
 package com.google.ai.edge.gallery.ui.llmchat
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.util.Log
 import androidx.datastore.core.DataStore
 import com.google.ai.edge.gallery.data.Model
@@ -13,7 +14,11 @@ import com.google.ai.edge.gallery.linglang.ParsedResponse
 import com.google.ai.edge.gallery.proto.UserData
 import com.google.ai.edge.gallery.tts.StreamingTtsPlayer
 import com.google.ai.edge.gallery.tts.VadRecorder
+import com.google.ai.edge.gallery.ui.common.chat.ChatMessageAudioClip
+import com.google.ai.edge.gallery.ui.common.chat.ChatMessageText
+import com.google.ai.edge.gallery.ui.common.chat.ChatSide
 import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Message
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.Locale
 import javax.inject.Inject
@@ -71,8 +76,14 @@ constructor(
   companion object {
     private const val USER_ID = "user_1"
     private const val GOALS_UPDATE_INTERVAL_TURNS = 5
-    /** Auto-reset conversation context after this many assistant turns to prevent context overflow. */
-    private const val MAX_TURNS_BEFORE_RESET = 6
+    /**
+     * Maximum cumulative audio duration (seconds) before resetting conversation context.
+     * On-device models have limited context windows — audio tokens are extremely expensive
+     * (30s of 16kHz mono ≈ 480K tokens-equivalent). When cumulative audio exceeds this
+     * threshold, we reset the Conversation and replay text-only history, preserving the
+     * conversation while dropping old audio that would overflow the context window.
+     */
+    private const val MAX_CUMULATIVE_AUDIO_SEC = 25
   }
 
   private var contextManager: ContextManager? = null
@@ -83,6 +94,9 @@ constructor(
   /** Track current task/model for auto-reset. */
   private var currentTask: Task? = null
   private var currentModel: Model? = null
+
+  /** Cumulative audio duration (seconds) sent in this conversation. Used for context window management. */
+  private var cumulativeAudioSec: Float = 0f
 
   /** Accumulates the full LLM response for metadata parsing after generation ends. */
   private val responseBuffer = StringBuilder()
@@ -157,11 +171,12 @@ constructor(
     startSession()
   }
 
-  /** Start a new learning session — records start time, resets turn count. */
+  /** Start a new learning session — records start time, resets turn and audio counters. */
   private fun startSession() {
     sessionStartTime = System.currentTimeMillis() / 1000
     sessionActive = true
     turnCount = 0
+    cumulativeAudioSec = 0f
     responseBuffer.clear()
     Log.d(TAG, "Session started at $sessionStartTime")
   }
@@ -216,6 +231,29 @@ constructor(
     }
   }
 
+  /** Track audio duration for context-window sliding window management. */
+  override fun generateResponse(
+    model: Model,
+    input: String,
+    images: List<Bitmap>,
+    audioMessages: List<ChatMessageAudioClip>,
+    onFirstToken: (Model) -> Unit,
+    onDone: () -> Unit,
+    onError: (String) -> Unit,
+    allowThinking: Boolean,
+  ) {
+    // Track cumulative audio duration before forwarding to super.
+    // This drives the sliding-window context reset — when cumulative audio
+    // exceeds MAX_CUMULATIVE_AUDIO_SEC, onGenerationEnd() will reset the
+    // Conversation with text-only history.
+    for (clip in audioMessages) {
+      recordAudioSent(clip)
+    }
+    super.generateResponse(
+      model, input, images, audioMessages, onFirstToken, onDone, onError, allowThinking
+    )
+  }
+
   /** Signal generation start to the TTS player. Resets metadata-stripping state. */
   fun onGenerationStart() {
     insideMetadataTag = false
@@ -229,8 +267,8 @@ constructor(
   /**
    * Signal generation end.  Parses the accumulated response to extract
    * metadata, update SRS, and periodically update goals.
-   * Also auto-resets conversation context every MAX_TURNS_BEFORE_RESET turns
-   * to prevent on-device model context overflow.
+   * Also checks if cumulative audio duration exceeds the context window budget
+   * and triggers a sliding-window reset that replays text-only history.
    */
   fun onGenerationEnd() {
     // Always forward — flushes any buffered text and resets player state.
@@ -239,19 +277,36 @@ constructor(
     // Parse the full accumulated response for metadata
     processResponseMetadata()
 
-    // Auto-reset conversation context to prevent context overflow on
-    // the on-device model. After MAX_TURNS_BEFORE_RESET assistant turns,
-    // start a fresh conversation with the enriched system prompt so the
-    // model retains the learning context but discards stale history.
-    if (turnCount >= MAX_TURNS_BEFORE_RESET) {
+    // Sliding-window reset: when cumulative audio exceeds the budget,
+    // reset the Conversation and replay text-only history. Audio tokens
+    // are extremely expensive on-device (30s ≈ context-killing), so we
+    // drop old audio while preserving all text context.
+    if (cumulativeAudioSec >= MAX_CUMULATIVE_AUDIO_SEC) {
       val task = currentTask
       val model = currentModel
       val language = _selectedLanguage.value
       if (task != null && model != null) {
-        Log.i(TAG, "Auto-resetting conversation after $turnCount turns")
-        turnCount = 0
+        Log.i(TAG, "Audio context window full (${cumulativeAudioSec}s ≥ ${MAX_CUMULATIVE_AUDIO_SEC}s). Resetting with text-only history.")
+        cumulativeAudioSec = 0f
         val contextualPrompt = buildContextualSystemPrompt(language.systemPromptSuffix)
         _uiSystemPrompt.value = contextualPrompt
+
+        // Collect text-only messages to replay into the new Conversation.
+        // Audio clips are dropped — they're what overflowed the context.
+        // Metadata tags are also stripped so they don't waste tokens.
+        val currentMessages = uiState.value.messagesByModel[model.name].orEmpty()
+        val initialMessages = currentMessages
+          .filterIsInstance<ChatMessageText>()
+          .mapNotNull { msg ->
+            val content = LangMetadataParser.stripMetadataTags(msg.content)
+            if (content.isBlank()) null
+            else when (msg.side) {
+              ChatSide.USER -> Message.user(content)
+              ChatSide.AGENT -> Message.model(content)
+              ChatSide.SYSTEM -> null
+            }
+          }
+
         viewModelScope.launch {
           systemPromptRepository?.updateSystemPrompt(task.id, language.systemPromptSuffix)
           resetSession(
@@ -260,12 +315,28 @@ constructor(
             systemInstruction = Contents.of(contextualPrompt),
             supportImage = false,
             supportAudio = true,
+            initialMessages = initialMessages,
+            // clearHistory=false preserves the chat UI; only the internal
+            // Conversation is reset. Text-only messages are replayed above.
+            clearHistory = false,
           )
         }
       } else {
         Log.w(TAG, "Cannot auto-reset: task=$task, model=$model")
       }
     }
+  }
+
+  /**
+   * Called when audio clips are sent to the LLM. Tracks cumulative audio
+   * duration for the sliding-window context management.
+   * @param audioClip the audio clip being sent to the model
+   */
+  fun recordAudioSent(audioClip: ChatMessageAudioClip) {
+    // Duration = bytes / (sampleRate * 2 bytes per sample * 1 channel)
+    val durationSec = audioClip.audioData.size.toFloat() / (audioClip.sampleRate * 2f)
+    cumulativeAudioSec += durationSec
+    Log.d(TAG, "Audio clip sent: ${durationSec}s, cumulative: ${cumulativeAudioSec}s")
   }
 
   /**
@@ -367,6 +438,8 @@ constructor(
     // Track for auto-reset
     currentTask = task
     currentModel = model
+    // Language change resets the session, so reset audio counter
+    cumulativeAudioSec = 0f
 
     // Build context-enriched system prompt
     val basePrompt = language.systemPromptSuffix
