@@ -17,6 +17,7 @@ import com.google.ai.edge.gallery.tts.VadRecorder
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageAudioClip
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageText
 import com.google.ai.edge.gallery.ui.common.chat.ChatSide
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Message
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -80,10 +81,14 @@ constructor(
      * Maximum cumulative audio duration (seconds) before resetting conversation context.
      * On-device models have limited context windows — audio tokens are extremely expensive
      * (30s of 16kHz mono ≈ 480K tokens-equivalent). When cumulative audio exceeds this
-     * threshold, we reset the Conversation and replay text-only history, preserving the
-     * conversation while dropping old audio that would overflow the context window.
+     * threshold, we reset the Conversation and replay text + recent audio history.
      */
     private const val MAX_CUMULATIVE_AUDIO_SEC = 25
+    /**
+     * When resetting, how many seconds of the most recent audio to keep.
+     * Preserves immediate voice context for conversational continuity.
+     */
+    private const val KEEP_RECENT_AUDIO_SEC = 10
   }
 
   private var contextManager: ContextManager? = null
@@ -97,6 +102,9 @@ constructor(
 
   /** Cumulative audio duration (seconds) sent in this conversation. Used for context window management. */
   private var cumulativeAudioSec: Float = 0f
+
+  /** Sliding window of recent audio clips for replay on context reset. */
+  private val recentAudioClips = mutableListOf<ChatMessageAudioClip>()
 
   /** Accumulates the full LLM response for metadata parsing after generation ends. */
   private val responseBuffer = StringBuilder()
@@ -177,6 +185,7 @@ constructor(
     sessionActive = true
     turnCount = 0
     cumulativeAudioSec = 0f
+    recentAudioClips.clear()
     responseBuffer.clear()
     Log.d(TAG, "Session started at $sessionStartTime")
   }
@@ -278,34 +287,90 @@ constructor(
     processResponseMetadata()
 
     // Sliding-window reset: when cumulative audio exceeds the budget,
-    // reset the Conversation and replay text-only history. Audio tokens
+    // reset the Conversation and replay text + recent audio history. Audio tokens
     // are extremely expensive on-device (30s ≈ context-killing), so we
-    // drop old audio while preserving all text context.
+    // drop older audio while preserving all text context and the most recent clips
+    // for conversational continuity.
     if (cumulativeAudioSec >= MAX_CUMULATIVE_AUDIO_SEC) {
       val task = currentTask
       val model = currentModel
       val language = _selectedLanguage.value
       if (task != null && model != null) {
-        Log.i(TAG, "Audio context window full (${cumulativeAudioSec}s ≥ ${MAX_CUMULATIVE_AUDIO_SEC}s). Resetting with text-only history.")
+        Log.i(TAG, "Audio context window full (${cumulativeAudioSec}s ≥ ${MAX_CUMULATIVE_AUDIO_SEC}s). Resetting with text + recent audio.")
         cumulativeAudioSec = 0f
+
+        // Select recent audio clips to keep (up to KEEP_RECENT_AUDIO_SEC).
+        // Iterate from newest to oldest, accumulating until budget is spent.
+        val clipsToKeep = mutableListOf<ChatMessageAudioClip>()
+        var keptDuration = 0f
+        for (clip in recentAudioClips.reversed()) {
+          val clipDuration = clip.audioData.size.toFloat() / (clip.sampleRate * 2f)
+          if (keptDuration + clipDuration > KEEP_RECENT_AUDIO_SEC) break
+          clipsToKeep.add(0, clip) // maintain chronological order
+          keptDuration += clipDuration
+        }
+        recentAudioClips.clear()
+        // Re-add only the clips we're keeping so they appear in the next cycle
+        recentAudioClips.addAll(clipsToKeep)
+        cumulativeAudioSec = keptDuration
+
         val contextualPrompt = buildContextualSystemPrompt(language.systemPromptSuffix)
         _uiSystemPrompt.value = contextualPrompt
 
-        // Collect text-only messages to replay into the new Conversation.
-        // Audio clips are dropped — they're what overflowed the context.
-        // Metadata tags are also stripped so they don't waste tokens.
+        // Build initial messages: text (stripped of metadata) + recent audio.
+        // Audio clips are attached to the user turn they accompanied.
         val currentMessages = uiState.value.messagesByModel[model.name].orEmpty()
-        val initialMessages = currentMessages
+        val textMessages = currentMessages
           .filterIsInstance<ChatMessageText>()
           .mapNotNull { msg ->
             val content = LangMetadataParser.stripMetadataTags(msg.content)
             if (content.isBlank()) null
-            else when (msg.side) {
-              ChatSide.USER -> Message.user(content)
-              ChatSide.AGENT -> Message.model(content)
-              ChatSide.SYSTEM -> null
+            else Pair(msg, content)
+          }
+
+        // Build a set of audio clip references (by identity) to match against text turns.
+        // AudioClips are paired with the user message that was sent alongside them.
+        val keptAudioSet = clipsToKeep.toSet()
+        val audioByUserTurn = mutableMapOf<Int, MutableList<ByteArray>>()
+        // Walk all messages to find audio clips and associate them with user text indices
+        var userIdx = 0
+        for (msg in currentMessages) {
+          when (msg) {
+            is ChatMessageText -> {
+              if (msg.side == ChatSide.USER) userIdx++
+            }
+            is ChatMessageAudioClip -> {
+              if (msg in keptAudioSet) {
+                audioByUserTurn.getOrPut(userIdx) { mutableListOf() }
+                  .add(msg.genByteArrayForWav())
+              }
             }
           }
+        }
+
+        // Build LiteRT Messages with audio attached to matching user turns
+        var currentUserIdx = 0
+        val initialMessages = textMessages.mapNotNull { (msg, content) ->
+          if (msg.side == ChatSide.USER) {
+            currentUserIdx++
+            val audioForThisTurn = audioByUserTurn[currentUserIdx]
+            if (audioForThisTurn != null) {
+              // Multi-modal user message: text + audio
+              val contents = mutableListOf<Content>()
+              for (audio in audioForThisTurn) {
+                contents.add(Content.AudioBytes(audio))
+              }
+              contents.add(Content.Text(content))
+              Message.user(Contents.of(contents))
+            } else {
+              Message.user(content)
+            }
+          } else if (msg.side == ChatSide.AGENT) {
+            Message.model(content)
+          } else {
+            null
+          }
+        }
 
         viewModelScope.launch {
           systemPromptRepository?.updateSystemPrompt(task.id, language.systemPromptSuffix)
@@ -317,7 +382,7 @@ constructor(
             supportAudio = true,
             initialMessages = initialMessages,
             // clearHistory=false preserves the chat UI; only the internal
-            // Conversation is reset. Text-only messages are replayed above.
+            // Conversation is reset. Text + recent audio are replayed above.
             clearHistory = false,
           )
         }
@@ -336,6 +401,7 @@ constructor(
     // Duration = bytes / (sampleRate * 2 bytes per sample * 1 channel)
     val durationSec = audioClip.audioData.size.toFloat() / (audioClip.sampleRate * 2f)
     cumulativeAudioSec += durationSec
+    recentAudioClips.add(audioClip)
     Log.d(TAG, "Audio clip sent: ${durationSec}s, cumulative: ${cumulativeAudioSec}s")
   }
 
